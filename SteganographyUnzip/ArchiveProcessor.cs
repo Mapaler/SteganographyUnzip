@@ -11,9 +11,6 @@ public class InvalidPasswordException : Exception
 
 public class ArchiveProcessor
 {
-    private static readonly Regex PasswordHintRegex = new(
-        @"(?:解压码|密码)(?:：|:)(?<pw>\S+)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private readonly FileInfo[] _archives;
     private readonly string _userProvidedPassword; // 来自 -p
@@ -213,10 +210,14 @@ public class ArchiveProcessor
         return args.ToString();
     }
 
+    #region 从路径里提取密码的逻辑
+    private static readonly Regex PasswordHintRegex = new(
+        @"(?:解压码|密码)(?:：|:)(?<pw>\S+)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static string? ExtractPasswordFromPath(string path)
     {
         // 先试文件名
-        string fileName = Path.GetFileName(path);
+        string fileName = Path.GetFileNameWithoutExtension(path);
         if (TryExtract(fileName, out string? pwd))
             return pwd;
 
@@ -238,6 +239,7 @@ public class ArchiveProcessor
             return match.Success;
         }
     }
+    #endregion
 
     // ✅ 实时流消费（关键：立即打印）
     private static async Task ConsumeStreamAsync(

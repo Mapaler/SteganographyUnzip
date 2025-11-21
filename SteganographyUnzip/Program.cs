@@ -41,8 +41,8 @@ internal class Program
             if (tokenResult.Tokens.Count == 0)
                 return null;
             string raw = tokenResult.Tokens[0].Value;
-            string[] parts = raw.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-            List<string> passwords = new();
+            string[] parts = raw.Split([','], StringSplitOptions.RemoveEmptyEntries);
+            List<string> passwords = [];
             foreach (string part in parts)
             {
                 string trimmed = part.Trim();
@@ -57,7 +57,7 @@ internal class Program
 
     private static readonly RootCommand rootCommand = new(
         $"自动解压隐写 MP4 压缩包和多层压缩包。{Environment.NewLine}" +
-        "请自行安装 Bandizip 或 7-zip，或将他们的可执行文件复制到本程序目录下。")
+        "请自行安装 Bandizip 或 7-zip/NanaZip，或将他们的控制台版本可执行文件复制到本程序目录下。")
     {
         argumentPaths,
         optionPassword,

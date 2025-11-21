@@ -3,6 +3,12 @@ using System.IO;
 
 namespace SteganographyUnzip;
 
+public enum ExtractorType
+{
+    Bandizip,
+    SevenZip
+}
+
 public readonly record struct ExtractorInfo(string CommandName, ExtractorType Type);
 
 public static class ExtractorDetector
@@ -12,7 +18,7 @@ public static class ExtractorDetector
         ("bz", ExtractorType.Bandizip),
         ("7z", ExtractorType.SevenZip),
         ("7za", ExtractorType.SevenZip),
-        ("NanaZipC", ExtractorType.SevenZip) // 显式支持 NanaZipC
+        ("NanaZipC", ExtractorType.SevenZip)
     };
 
     /// <summary>

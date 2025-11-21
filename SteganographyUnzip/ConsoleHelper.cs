@@ -1,11 +1,16 @@
-﻿using System;
+using System;
 
 namespace SteganographyUnzip
 {
 	public static class ConsoleHelper
-	{
-		// 带背景色版本
-		public static void WriteColorLine(ConsoleColor foreground, ConsoleColor background, string format, params object[] args)
+    {
+        // 原版
+        public static void WriteLine(string format, params object[] args)
+        {
+            Console.WriteLine(format, args);
+        }
+        // 带背景色版本
+        public static void WriteColorLine(ConsoleColor foreground, ConsoleColor background, string format, params object[] args)
 		{
 			// 保存原始颜色
 			ConsoleColor originalFg = Console.ForegroundColor;
