@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "SteganographyUnzip": {
+      "commandName": "Project",
+      "commandLineArgs": "-h"
+    }
+  }
+}

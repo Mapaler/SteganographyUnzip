@@ -1,0 +1,42 @@
+﻿# EditorConfig for SteganographyUnzip - Enforce explicit types and modern C# style
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.cs]
+# C# 特定设置
+csharp_using_directive_placement = outside_namespace
+csharp_prefer_simple_default_expression = true
+csharp_prefer_braces = true
+csharp_prefer_simple_using_statement = true
+
+# 🔑 关键：禁止 var，强制显式类型
+dotnet_style_var_for_built_in_types = false
+dotnet_style_var_when_type_is_apparent = false
+dotnet_style_var_elsewhere = false
+
+# 启用 new() 语法（.NET 9+ / C# 12）
+csharp_style_implicit_object_creation_when_type_is_apparent = true
+
+# 命名规范
+dotnet_naming_rule.private_fields_should_be_camel_case.severity = suggestion
+dotnet_naming_rule.private_fields_should_be_camel_case.symbols = private_fields
+dotnet_naming_rule.private_fields_should_be_camel_case.style = camel_case_style
+
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_symbols.private_fields.required_modifiers = readonly
+
+dotnet_naming_style.camel_case_style.capitalization = camel_case
+
+# 其他推荐
+csharp_space_between_parentheses = false
+csharp_space_after_keywords_in_control_flow_statements = true
+csharp_preserve_single_line_blocks = false
+csharp_preserve_single_line_statements = false
