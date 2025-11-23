@@ -19,8 +19,7 @@ internal class Program
     };
     private static readonly Option<DirectoryInfo> optionOutputDirectory = new("--output-directory", "-o")
     {
-        Description = "解码目标目录",
-        DefaultValueFactory = parseResult => new DirectoryInfo(Directory.GetCurrentDirectory())
+        Description = "解码目标目录"
     };
     private static readonly Option<DirectoryInfo> optionTempDirectory = new("--temp-directory", "-t")
     {
@@ -82,7 +81,7 @@ internal class Program
         {
             FileInfo[] archives = parseResult.GetValue(argumentPaths)!;
             string password = parseResult.GetValue(optionPassword) ?? string.Empty;
-            DirectoryInfo outputDir = parseResult.GetValue(optionOutputDirectory)!;
+            DirectoryInfo? outputDir = parseResult.GetValue(optionOutputDirectory);
             DirectoryInfo tempDir = parseResult.GetValue(optionTempDirectory)!;
             string? exeName= parseResult.GetValue(optionExeType);
             List<string>? additionalPasswords = parseResult.GetValue(optionTryPasswords);

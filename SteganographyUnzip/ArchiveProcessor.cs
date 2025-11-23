@@ -14,7 +14,7 @@ public class ArchiveProcessor
 
     private readonly FileInfo[] _archives;
     private readonly string _userProvidedPassword; // 来自 -p
-    private readonly DirectoryInfo _outputDir;
+    private readonly DirectoryInfo? _outputDir;
     private readonly DirectoryInfo _tempDir;
     private readonly string? _userSpecifiedExe;
     private readonly IReadOnlyList<string>? _additionalPasswords; // 来自 --try-passwords
@@ -22,14 +22,14 @@ public class ArchiveProcessor
     public ArchiveProcessor(
         FileInfo[] archives,
         string userProvidedPassword,
-        DirectoryInfo outputDir,
+        DirectoryInfo? outputDir,
         DirectoryInfo tempDir,
         string? userSpecifiedExe,
         IReadOnlyList<string>? additionalPasswords)
     {
         _archives = archives ?? throw new ArgumentNullException(nameof(archives));
         _userProvidedPassword = userProvidedPassword ?? string.Empty;
-        _outputDir = outputDir ?? throw new ArgumentNullException(nameof(outputDir));
+        _outputDir = outputDir;
         _tempDir = tempDir ?? throw new ArgumentNullException(nameof(tempDir));
         _userSpecifiedExe = userSpecifiedExe;
         _additionalPasswords = additionalPasswords;
@@ -73,7 +73,7 @@ public class ArchiveProcessor
         CancellationToken cancellationToken)
     {
         // 构建密码候选列表（保持顺序）
-        var candidates = new List<string>();
+        List<string> candidates = new();
 
         // 1. 用户通过 -p 提供的密码（最高优先级）
         if (!string.IsNullOrEmpty(_userProvidedPassword))
@@ -129,7 +129,7 @@ public class ArchiveProcessor
         string password,
         CancellationToken cancellationToken)
     {
-        string arguments = BuildArguments(extractor.Type, archive, _outputDir, password);
+        string arguments = BuildArguments(extractor.Type, archive, _outputDir ?? archive.Directory, password);
 
         var startInfo = new ProcessStartInfo
         {
@@ -159,10 +159,6 @@ public class ArchiveProcessor
 
         throw new InvalidPasswordException("密码错误或文件无效");
     }
-
-    // 🔁 重构：支持同时打印和缓存（用于密码判断）
-    // 但我们先用简单方案：靠用户肉眼判断 + 重试机制兜底
-    // 如果你希望更精确，请告知，我可以加入 stderr 缓存
 
     private static string BuildArguments(
         ExtractorType type,
