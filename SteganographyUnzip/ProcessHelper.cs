@@ -1,7 +1,6 @@
 // ProcessHelper.cs
 using System.Diagnostics;
 using System.Text;
-using static DebugUtil;
 
 namespace SteganographyUnzip;
 
@@ -13,7 +12,7 @@ public static class ProcessHelper
         bool showOutput = true,
         CancellationToken ct = default)
     {
-        DebugLog($"执行命令: {fileName} {arguments}");
+        ConsoleHelper.Debug($"执行命令: {fileName} {arguments}");
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         linkedCts.CancelAfter(TimeSpan.FromMinutes(2)); // ⏱️ 2分钟超时

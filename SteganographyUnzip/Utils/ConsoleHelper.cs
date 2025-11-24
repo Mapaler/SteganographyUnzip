@@ -1,99 +1,69 @@
 using System;
+using System.Diagnostics;
 
-namespace SteganographyUnzip
+namespace SteganographyUnzip;
+
+public static class ConsoleHelper
 {
-	public static class ConsoleHelper
+    // 核心：仅用于 stdout 的彩色输出
+    public static void WriteLineStyled(params (string text, ConsoleColor? fg, ConsoleColor? bg)[] segments)
     {
-        // 原版
-        public static void WriteLine(string format, params object[] args)
+        if (segments == null || segments.Length == 0)
         {
-            Console.WriteLine(format, args);
-        }
-        // 带背景色版本
-        public static void WriteColorLine(ConsoleColor foreground, ConsoleColor background, string format, params object[] args)
-		{
-			// 保存原始颜色
-			ConsoleColor originalFg = Console.ForegroundColor;
-			ConsoleColor originalBg = Console.BackgroundColor;
-			
-			try
-			{
-				// 设置新颜色
-				Console.ForegroundColor = foreground;
-				Console.BackgroundColor = background;
-				
-				// 格式化并输出文本
-				Console.WriteLine(format, args);
-			}
-			finally
-			{
-				// 恢复原始颜色
-				Console.ForegroundColor = originalFg;
-				Console.BackgroundColor = originalBg;
-			}
-		}
-		// 只有前景色重载
-		public static void WriteColorLine(ConsoleColor foreground, string format, params object[] args)
-		{
-			// 保存原始颜色
-			ConsoleColor originalBg = Console.BackgroundColor;
-			WriteColorLine(foreground, originalBg, format, args);
-		}
-		// 无参数的简单版本重载
-		public static void WriteColorLine(ConsoleColor foreground, string message)
-		{
-			WriteColorLine(foreground, "{0}", message);
+            Console.WriteLine();
+            return;
         }
 
-        // 带背景色版本
-        public static void ErrorWriteColorLine(ConsoleColor foreground, ConsoleColor background, string format, params object[] args)
-        {
-            // 保存原始颜色
-            ConsoleColor originalFg = Console.ForegroundColor;
-            ConsoleColor originalBg = Console.BackgroundColor;
+        var origFg = Console.ForegroundColor;
+        var origBg = Console.BackgroundColor;
 
-            try
+        try
+        {
+            foreach (var (text, fg, bg) in segments)
             {
-                // 设置新颜色
-                Console.ForegroundColor = foreground;
-                Console.BackgroundColor = background;
-
-                // 格式化并输出文本
-                Console.Error.WriteLine(format, args);
+                if (fg.HasValue)
+                    Console.ForegroundColor = fg.Value;
+                if (bg.HasValue)
+                    Console.BackgroundColor = bg.Value;
+                Console.Write(text);
             }
-            finally
-            {
-                // 恢复原始颜色
-                Console.ForegroundColor = originalFg;
-                Console.BackgroundColor = originalBg;
-            }
+            Console.WriteLine();
         }
-        // 只有前景色重载
-        public static void ErrorWriteColorLine(ConsoleColor foreground, string format, params object[] args)
+        finally
         {
-            // 保存原始颜色
-            ConsoleColor originalBg = Console.BackgroundColor;
-            ErrorWriteColorLine(foreground, originalBg, format, args);
-        }
-        // 无参数的简单版本重载
-        public static void ErrorWriteColorLine(ConsoleColor foreground, string message)
-        {
-            ErrorWriteColorLine(foreground, "{0}", message);
-        }
-        // 带格式书写错误
-        public static void WriteErrorType(ConsoleColor foreground, ConsoleColor background, string message, string errorType = "ERROR", params object[] args)
-        {
-            ErrorWriteColorLine(foreground, background, $"[{DateTime.Now:HH:mm:ss}] [{errorType}] {message}", args);
-        }
-        // 直接写红色的错误，带时间的
-        public static void WriteError(string message, params object[] args)
-        {
-            WriteErrorType(ConsoleColor.Red, Console.BackgroundColor, message, "错误", args);
-        }
-        // 直接写黄色的警告，带时间的
-        public static void WriteWarning(string message, params object[] args)
-        {
-            WriteErrorType(ConsoleColor.Yellow, Console.BackgroundColor, message, "警告", args);
+            Console.ForegroundColor = origFg;
+            Console.BackgroundColor = origBg;
         }
     }
+
+    // ========== 日志方法 ==========
+
+    public static void Info(string message)
+        => WriteLineStyled(
+            ($"[{DateTime.Now:HH:mm:ss}] ", ConsoleColor.DarkGray, null),
+            ("[信息] ", ConsoleColor.Gray, null),
+            (message, null, null));
+
+    public static void Success(string message)
+        => WriteLineStyled(
+            ($"[{DateTime.Now:HH:mm:ss}] ", ConsoleColor.DarkGray, null),
+            ("[成功] ", ConsoleColor.Green, null),
+            (message, null, null));
+
+    public static void Warning(string message)
+        => WriteLineStyled(
+            ($"[{DateTime.Now:HH:mm:ss}] ", ConsoleColor.DarkGray, null),
+            ("[警告] ", ConsoleColor.Yellow, null),
+            (message, null, null));
+
+    // ❗ 错误信息走 stderr，不带颜色（保证 CLI 行为正确）
+    public static void Error(string message)
+        => Console.Error.WriteLine($"[{DateTime.Now:HH:mm:ss}] [错误] {message}");
+
+    // Debug 走 stdout（带颜色，仅 DEBUG 模式）
+    [Conditional("DEBUG")]
+    public static void Debug(string message)
+        => WriteLineStyled(
+            ("[DEBUG] ", ConsoleColor.Red, ConsoleColor.White),
+            ($" {message}", ConsoleColor.Gray, null));
 }

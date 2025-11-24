@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
-using static DebugUtil;
 
 namespace SteganographyUnzip;
 
@@ -119,6 +118,12 @@ public class ArchiveProcessor
                         Console.WriteLine("🔍 检测到隐写载体，尝试解压下一层...");
                         foreach (var file in extractedFiles)
                         {
+                            if (ShouldSkipAsNonFirstVolume(file.Name))
+                            {
+                                Console.WriteLine($"⏭️ 跳过分卷文件: \"{file.Name}\"");
+                                continue;
+                            }
+
                             queue.Enqueue((file, finalOutput, effectivePassword));
                         }
                     }
@@ -145,7 +150,7 @@ public class ArchiveProcessor
                 {
                     if (_tempDir.Exists)
                     {
-                        DebugLog($"🗑️ 清理全部临时目录: {_tempDir.FullName}");
+                        ConsoleHelper.Debug($"🗑️ 清理全部临时目录: {_tempDir.FullName}");
                         _tempDir.Delete(true);
                     }
                 }
@@ -195,7 +200,7 @@ public class ArchiveProcessor
             }
         }
 
-        DebugLog($"🔍 为 \"{file.Name}\" 准备的密码候选: [{string.Join(", ", uniqueCandidates.Select(p => string.IsNullOrEmpty(p) ? "(空)" : p))}]");
+        ConsoleHelper.Debug($"🔍 为 \"{file.Name}\" 准备的密码候选: [{string.Join(", ", uniqueCandidates.Select(p => string.IsNullOrEmpty(p) ? "(空)" : p))}]");
         return uniqueCandidates;
     }
 
@@ -205,31 +210,41 @@ public class ArchiveProcessor
             return false;
 
         var archiveExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ".7z", ".zip", ".rar", ".tar", ".gz", ".bz2", ".xz"
-        };
-        var stegoCarrierExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp",
-            ".mp4", ".mov", ".avi", ".mkv", ".wmv",
-            ".wav", ".mp3", ".flac", ".pdf"
-        };
+    {
+        ".7z", ".zip", ".rar", ".tar", ".gz", ".bz2", ".xz"
+    };
 
-        // 情况 1：只解压出 1 个文件
+        var stegoCarrierExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp",
+        ".mp4", ".mov", ".avi", ".mkv", ".wmv",
+        ".wav", ".mp3", ".flac",
+        ".pdf"
+    };
+
+        // 情况 1：单文件
         if (fileList.Count == 1)
         {
             string filePath = fileList[0];
             string fileName = Path.GetFileName(filePath);
             string ext = Path.GetExtension(fileName);
 
-            if (archiveExtensions.Contains(ext))
+            if (archiveExtensions.Contains(ext) || stegoCarrierExtensions.Contains(ext))
                 return true;
-            if (stegoCarrierExtensions.Contains(ext))
-                return true;
+
+            // 单个 .001 文件也视为可继续（虽然少见）
+            if (fileName.EndsWith(".001", StringComparison.OrdinalIgnoreCase))
+            {
+                string baseName = Path.GetFileNameWithoutExtension(fileName);
+                string baseExt = Path.GetExtension(baseName);
+                if (archiveExtensions.Contains(baseExt))
+                    return true;
+            }
+
             return false;
         }
 
-        // 情况 2：多个文件 → 检查是否含压缩包或 .001 分卷
+        // 情况 2：多文件 → 只检查是否含压缩包或 .001 分卷
         foreach (string filePath in fileList)
         {
             string fileName = Path.GetFileName(filePath);
@@ -238,7 +253,7 @@ public class ArchiveProcessor
             if (archiveExtensions.Contains(ext))
                 return true;
 
-            // 检查 .001 分卷（必须和主扩展名匹配）
+            // 关键：只要存在 .001 分卷，就认为可继续
             if (fileName.EndsWith(".001", StringComparison.OrdinalIgnoreCase))
             {
                 string baseName = Path.GetFileNameWithoutExtension(fileName);
@@ -299,7 +314,7 @@ public class ArchiveProcessor
                 string stderr = error.ToString();
                 if (IsPasswordRelatedError(stderr))
                 {
-                    DebugLog($"密码 '{pwd}' 导致密码错误，继续尝试下一个");
+                    ConsoleHelper.Debug($"密码 '{pwd}' 导致密码错误，继续尝试下一个");
                     continue;
                 }
 
@@ -307,7 +322,7 @@ public class ArchiveProcessor
             }
             catch (Exception ex) when (IsPasswordRelatedError(ex.Message))
             {
-                DebugLog($"密码 '{pwd}' 抛出密码相关异常，继续尝试下一个: {ex.Message}");
+                ConsoleHelper.Debug($"密码 '{pwd}' 抛出密码相关异常，继续尝试下一个: {ex.Message}");
                 continue;
             }
         }
@@ -356,5 +371,72 @@ public class ArchiveProcessor
                msg.Contains("data error") ||
                msg.Contains("cannot open encrypted") ||
                msg.Contains("0xa0000020"); // Bandizip 特定错误码
+    }
+
+    /// <summary>
+    /// 判断是否为非首部分卷文件，若是则应跳过处理。
+    /// 支持：7z/zip/rar 的各种分卷格式。
+    /// </summary>
+    private static bool ShouldSkipAsNonFirstVolume(string fileName)
+    {
+        if (string.IsNullOrEmpty(fileName))
+            return false;
+
+        // === 1. RAR 新格式: xxx.partNN.rar （NN >= 02）===
+        var partRarMatch = System.Text.RegularExpressions.Regex.Match(
+            fileName,
+            @"\.part(\d{2,})\.rar$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (partRarMatch.Success)
+        {
+            if (int.TryParse(partRarMatch.Groups[1].Value, out int partNum))
+            {
+                return partNum >= 2; // part01 是首卷，part02+ 跳过
+            }
+        }
+
+        // === 2. ZIP 分卷: xxx.zNN （NN >= 01）===
+        // 注意：首卷是 .zip，不是 .z00
+        var zipVolMatch = System.Text.RegularExpressions.Regex.Match(
+            fileName,
+            @"\.z(\d{2})$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (zipVolMatch.Success)
+        {
+            // 所有 .zXX 都是非首卷（因为首卷是 .zip）
+            return true;
+        }
+
+        // === 3. RAR 旧格式: xxx.rNN （NN >= 00）===
+        // 首卷是 .rar，.r00 是第二卷
+        var rarVolMatch = System.Text.RegularExpressions.Regex.Match(
+            fileName,
+            @"\.r(\d{2})$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (rarVolMatch.Success)
+        {
+            // 所有 .rXX 都是非首卷
+            return true;
+        }
+
+        // === 4. 通用数字分卷: xxx.7z.001, xxx.zip.002 等 ===
+        // 匹配结尾为 .DDD（三位数字），且 DDD != "001"
+        var genericVolMatch = System.Text.RegularExpressions.Regex.Match(
+            fileName,
+            @"\.(00[2-9]|0[1-9]\d|[1-9]\d{2})$"); // 匹配 002~999
+        if (genericVolMatch.Success)
+        {
+            // 进一步确认前面是压缩格式（可选，但更安全）
+            string baseName = fileName[..^genericVolMatch.Length]; // 移除 .002 等
+            string baseExt = Path.GetExtension(baseName).ToLowerInvariant();
+            var archiveExts = new HashSet<string> { ".7z", ".zip", ".rar", ".tar", ".gz", ".bz2", ".xz" };
+            if (archiveExts.Contains(baseExt))
+            {
+                return true; // 是 .002+ 的压缩分卷 → 跳过
+            }
+        }
+
+        // 其他情况：不是分卷，或为首部分卷（如 .zip, .rar, .7z.001, .part01.rar）
+        return false;
     }
 }
