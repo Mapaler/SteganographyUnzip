@@ -81,13 +81,47 @@ internal class Program
         {
             FileInfo[] archives = parseResult.GetValue(argumentPaths)!;
             string password = parseResult.GetValue(optionPassword) ?? string.Empty;
-            DirectoryInfo? outputDir = parseResult.GetValue(optionOutputDirectory);
+            DirectoryInfo? userOutputDir = parseResult.GetValue(optionOutputDirectory); // 用户指定的（可能为 null）
             DirectoryInfo tempDir = parseResult.GetValue(optionTempDirectory)!;
-            string? exeName= parseResult.GetValue(optionExeType);
+            string? exeName = parseResult.GetValue(optionExeType);
             List<string>? additionalPasswords = parseResult.GetValue(optionTryPasswords);
 
-            ArchiveProcessor processor = new(archives, password, outputDir, tempDir, exeName, additionalPasswords);
-            await processor.ProcessAsync(cancellationToken);
+            // 确保临时目录存在
+            if (!tempDir.Exists)
+                tempDir.Create();
+
+            // 🔁 对每个输入的压缩包分别处理
+            foreach (var archive in archives)
+            {
+                if (!archive.Exists)
+                {
+                    Console.WriteLine($"❌ 跳过不存在的文件: {archive.FullName}");
+                    continue;
+                }
+
+                DirectoryInfo finalOutputDir = userOutputDir ?? archive.Directory!;
+                if (!finalOutputDir.Exists)
+                    finalOutputDir.Create(); // 安全创建（虽然通常已存在）
+
+                try
+                {
+                    var processor = new ArchiveProcessor(
+                        outputDirectory: finalOutputDir.FullName,
+                        tempDirectory: tempDir.FullName,
+                        userProvidedPassword: password,
+                        additionalPasswords: additionalPasswords,
+                        userSpecifiedExtractor: exeName
+                    );
+
+                    await processor.ProcessAsync(archive.FullName, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"🔥 处理 {archive.Name} 时出错: {ex.Message}");
+                    // 可选择继续或退出，这里选择继续
+                }
+            }
+
             return 0;
         });
 

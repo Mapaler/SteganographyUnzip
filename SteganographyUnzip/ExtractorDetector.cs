@@ -3,12 +3,6 @@ using System.IO;
 
 namespace SteganographyUnzip;
 
-public enum ExtractorType
-{
-    Bandizip,
-    SevenZip
-}
-
 public readonly record struct ExtractorInfo(string CommandName, ExtractorType Type);
 
 public static class ExtractorDetector
