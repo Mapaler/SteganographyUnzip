@@ -41,32 +41,47 @@ public class ArchiveProcessor
         var extractor = ExtractorDetector.ResolveExtractor(_userSpecifiedExtractor);
         Console.WriteLine($"🔧 使用解压工具: {extractor.CommandName} ({extractor.Type})");
 
-        var queue = new Queue<(FileInfo archive, DirectoryInfo finalOutput, string? inheritedPassword)>();
-        queue.Enqueue((initialFile, _outputDir, null));
+        // 关键：使用字典跟踪临时目录的引用计数
+        var tempDirRefCount = new Dictionary<DirectoryInfo, int>();
+        var queue = new Queue<(FileInfo archive, DirectoryInfo finalOutput, string? inheritedPassword, DirectoryInfo? sourceTempDir)>();
+        queue.Enqueue((initialFile, _outputDir, null, null));
 
         bool completedSuccessfully = false;
         try
         {
             while (queue.Count > 0)
             {
-                var (currentFile, finalOutput, inheritedPassword) = queue.Dequeue();
+                var (currentFile, finalOutput, inheritedPassword, sourceTempDir) = queue.Dequeue();
+
+                // ✅ 重要修正：这里不删除临时目录！
+                // 临时目录的删除在文件处理完成后进行
+
+                // 检查当前文件是否存在
+                if (!currentFile.Exists)
+                {
+                    throw new FileNotFoundException($"文件不存在（可能已被提前清理）: {currentFile.FullName}");
+                }
+
                 Console.WriteLine($"\n📦 处理: {currentFile.Name} ({currentFile.Length / 1024 / 1024} MiB)");
 
                 var candidates = GetCandidatePasswords(currentFile, inheritedPassword);
                 var strategy = CreateStrategy(extractor.Type);
 
+                // 创建本次解压专用的临时子目录
                 string tempSubDirName = Path.GetRandomFileName();
                 var tempExtractDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, tempSubDirName));
                 tempExtractDir.Create();
 
+                // ✅ 重要修正：初始化引用计数为1（当前层正在使用）
+                tempDirRefCount[tempExtractDir] = 1; // 之前是0，现在改为1
+
                 try
                 {
-                    // === 1. 智能 List（仅用于预览）优先用继承密码，再用空密码===
+                    // === 1. 智能 List（预览）===
                     List<string> fileList = new();
                     string? listPasswordUsed = null;
                     bool isRecognizedAsArchive = false;
 
-                    // 尝试顺序：继承密码 -> 空密码
                     var listTryPasswords = new List<string>();
                     if (!string.IsNullOrEmpty(inheritedPassword))
                         listTryPasswords.Add(inheritedPassword);
@@ -81,29 +96,21 @@ public class ArchiveProcessor
                             fileList = tempFileList;
                             listPasswordUsed = pwd;
                             isRecognizedAsArchive = true;
-                            break; // 一旦成功就停
+                            break;
                         }
                         catch (Exception ex)
                         {
                             if (IsPasswordRelatedError(ex.Message))
-                            {
-                                continue; // 密码错误，试下一个
-                            }
-                            else
-                            {
-                                // 可能是非压缩文件（如纯MP4），先记录，不立即抛出
-                                // 继续尝试其他密码（虽然大概率都失败）
-                            }
+                                continue;
                         }
                     }
 
-                    // 如果所有密码都无法识别为压缩包，且文件是隐写载体类型 → 视为最终文件
                     if (!isRecognizedAsArchive && IsSteganographyCarrier(currentFile.Name))
                     {
                         Console.WriteLine($"📄 \"{currentFile.Name}\" 无法作为压缩包打开，视为最终内容文件。");
                         MoveFileToOutput(currentFile, finalOutput);
                         Console.WriteLine($"✅ 已保存到: {finalOutput.FullName}");
-                        continue; // 跳过解压，处理下一个队列项
+                        continue;
                     }
 
                     Console.WriteLine($"📄 内容预览 (使用密码: {(string.IsNullOrEmpty(listPasswordUsed) ? "(空)" : listPasswordUsed)}): " +
@@ -126,7 +133,7 @@ public class ArchiveProcessor
                     // === 4. 根据真实文件决定是否递归 ===
                     if (IsContinuableArchive(realFileNames))
                     {
-                        Console.WriteLine("🔍 检测到隐写载体，尝试解压下一层...");
+                        Console.WriteLine("🔍 检测到隐写载体或嵌套压缩包，尝试解压下一层...");
                         foreach (var file in extractedFiles)
                         {
                             if (ShouldSkipAsNonFirstVolume(file.Name))
@@ -135,46 +142,66 @@ public class ArchiveProcessor
                                 continue;
                             }
 
-                            queue.Enqueue((file, finalOutput, effectivePassword));
-                        }
+                            // ✅ 关键：将当前 tempExtractDir 作为下一层的 sourceTempDir
+                            queue.Enqueue((file, finalOutput, effectivePassword, tempExtractDir));
 
-                        // ✅ 关键：已将子文件入队，当前临时目录可安全删除
-                        try
-                        {
-                            if (tempExtractDir.Exists)
+                            // ✅ 增加 tempExtractDir 的引用计数
+                            if (tempDirRefCount.TryGetValue(tempExtractDir, out int currentCount))
                             {
-                                tempExtractDir.Delete(recursive: true);
-                                ConsoleHelper.Debug($"🗑️ 已清理中间临时目录: {tempExtractDir.Name}");
+                                tempDirRefCount[tempExtractDir] = currentCount + 1;
                             }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"⚠️ 无法删除临时目录 {tempExtractDir.Name}: {ex.Message}");
+                            else
+                            {
+                                tempDirRefCount[tempExtractDir] = 1;
+                            }
                         }
                     }
                     else
                     {
                         MoveFilesToOutput(tempExtractDir, finalOutput);
                         Console.WriteLine($"✅ 已解压到: {finalOutput.FullName}");
-
-                        // ✅ 清理已输出的临时目录（应为空）
-                        try
-                        {
-                            if (tempExtractDir.Exists && !tempExtractDir.EnumerateFileSystemInfos().Any())
-                            {
-                                tempExtractDir.Delete();
-                                ConsoleHelper.Debug($"🗑️ 已清理最终临时目录: {tempExtractDir.Name}");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            // 忽略删除失败
-                        }
                     }
                 }
                 finally
                 {
-                    // 不在此处统一清理，每个 tempExtractDir 已在分支中处理
+                    // ✅ 重要修正：在文件处理完成后删除临时目录
+                    // 1. 删除 sourceTempDir (如果存在)
+                    if (sourceTempDir != null && tempDirRefCount.TryGetValue(sourceTempDir, out int sourceCount))
+                    {
+                        sourceCount--;
+                        tempDirRefCount[sourceTempDir] = sourceCount;
+                        if (sourceCount == 0)
+                        {
+                            try
+                            {
+                                sourceTempDir.Delete(recursive: true);
+                                ConsoleHelper.Debug($"🗑️ 清理上一级临时目录: {sourceTempDir.Name} (引用计数归零)");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"⚠️ 无法删除上一级临时目录 {sourceTempDir.Name}: {ex.Message}");
+                            }
+                        }
+                    }
+
+                    // 2. 删除当前 tempExtractDir (如果它没有被引用)
+                    if (tempExtractDir != null && tempDirRefCount.TryGetValue(tempExtractDir, out int currentCount))
+                    {
+                        currentCount--;
+                        tempDirRefCount[tempExtractDir] = currentCount;
+                        if (currentCount == 0)
+                        {
+                            try
+                            {
+                                tempExtractDir.Delete(recursive: true);
+                                ConsoleHelper.Debug($"🗑️ 清理当前临时目录: {tempExtractDir.Name} (引用计数归零)");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"⚠️ 无法删除当前临时目录 {tempExtractDir.Name}: {ex.Message}");
+                            }
+                        }
+                    }
                 }
             }
 
@@ -183,40 +210,46 @@ public class ArchiveProcessor
         }
         finally
         {
-            // ❌ 不再删除 _tempDir 本身（它可能是系统 Temp 目录！）
-            // ✅ 所有子目录应在使用后立即清理
+            // 清理残留的临时目录
             if (!completedSuccessfully)
             {
-                Console.WriteLine($"ℹ️ 异常发生，部分临时子目录可能保留在: {_tempDir.FullName}");
+                foreach (var dir in tempDirRefCount.Keys)
+                {
+                    try
+                    {
+                        if (dir.Exists)
+                        {
+                            dir.Delete(recursive: true);
+                            ConsoleHelper.Debug($"🗑️ 异常后清理残留临时目录: {dir.Name}");
+                        }
+                    }
+                    catch { /* ignore */ }
+                }
+                Console.WriteLine($"ℹ️ 异常发生，已尽力清理临时子目录");
             }
-            // 否则：全部已清理，无需操作
         }
     }
+
+    #region 辅助方法（保持不变）
 
     private List<string> GetCandidatePasswords(FileInfo file, string? inheritedPassword)
     {
         var candidates = new List<string>();
 
-        // 1. 用户显式提供的密码（即使为空也加入）
         if (_userProvidedPassword != null)
             candidates.Add(_userProvidedPassword);
 
-        // 2. 从文件名/路径中提取的密码
         if (ExtractPasswordFromPath(file.FullName) is string pwdFromPath && !string.IsNullOrEmpty(pwdFromPath))
             candidates.Add(pwdFromPath);
 
-        // 3. 从父级继承的有效密码
         if (!string.IsNullOrEmpty(inheritedPassword))
             candidates.Add(inheritedPassword);
 
-        // 4. 额外预设的密码列表
         if (_additionalPasswords?.Count > 0)
             candidates.AddRange(_additionalPasswords.Where(p => !string.IsNullOrEmpty(p)));
 
-        // 5. 显式添加空密码（用于尝试无密码情况）
         candidates.Add("");
 
-        // 去重，但保留首次出现的顺序
         var seen = new HashSet<string>();
         var uniqueCandidates = new List<string>();
         foreach (var pwd in candidates)
@@ -249,7 +282,6 @@ public class ArchiveProcessor
             ".pdf"
         };
 
-        // 情况 1：单文件
         if (fileList.Count == 1)
         {
             string filePath = fileList[0];
@@ -259,7 +291,6 @@ public class ArchiveProcessor
             if (archiveExtensions.Contains(ext) || stegoCarrierExtensions.Contains(ext))
                 return true;
 
-            // 单个 .001 文件也视为可继续（虽然少见）
             if (fileName.EndsWith(".001", StringComparison.OrdinalIgnoreCase))
             {
                 string baseName = Path.GetFileNameWithoutExtension(fileName);
@@ -271,7 +302,6 @@ public class ArchiveProcessor
             return false;
         }
 
-        // 情况 2：多文件 → 只检查是否含压缩包或 .001 分卷
         foreach (string filePath in fileList)
         {
             string fileName = Path.GetFileName(filePath);
@@ -280,7 +310,6 @@ public class ArchiveProcessor
             if (archiveExtensions.Contains(ext))
                 return true;
 
-            // 关键：只要存在 .001 分卷，就认为可继续
             if (fileName.EndsWith(".001", StringComparison.OrdinalIgnoreCase))
             {
                 string baseName = Path.GetFileNameWithoutExtension(fileName);
@@ -293,7 +322,6 @@ public class ArchiveProcessor
         return false;
     }
 
-    // 移动所有文件（递归）
     private static void MoveFilesToOutput(DirectoryInfo source, DirectoryInfo target)
     {
         foreach (var file in source.GetFiles("*", SearchOption.AllDirectories))
@@ -305,13 +333,11 @@ public class ArchiveProcessor
         }
     }
 
-    // 移动单个文件
     private static void MoveFileToOutput(FileInfo sourceFile, DirectoryInfo targetDir)
     {
         Directory.CreateDirectory(targetDir.FullName);
         string destPath = Path.Combine(targetDir.FullName, sourceFile.Name);
 
-        // 防止重名
         int counter = 1;
         while (File.Exists(destPath))
         {
@@ -376,7 +402,6 @@ public class ArchiveProcessor
         return null;
     }
 
-    #region 从路径里提取密码的逻辑
     private static readonly Regex PasswordHintRegex = new(
         @"(?:解压码|密码)(?:：|:)(?<pw>\S+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -404,7 +429,6 @@ public class ArchiveProcessor
             return match.Success;
         }
     }
-    #endregion
 
     private static bool IsPasswordRelatedError(string message)
     {
@@ -417,69 +441,32 @@ public class ArchiveProcessor
                msg.Contains("headers error") ||
                msg.Contains("data error") ||
                msg.Contains("cannot open encrypted") ||
-               msg.Contains("0xa0000020"); // Bandizip 特定错误码
+               msg.Contains("0xa0000020");
     }
 
-    /// <summary>
-    /// 判断是否为非首部分卷文件，若是则应跳过处理。
-    /// 支持：7z/zip/rar 的各种分卷格式。
-    /// </summary>
     private static bool ShouldSkipAsNonFirstVolume(string fileName)
     {
         if (string.IsNullOrEmpty(fileName))
             return false;
 
-        // === 1. RAR 新格式: xxx.partNN.rar （NN >= 02）===
-        var partRarMatch = Regex.Match(
-            fileName,
-            @"\.part(\d{2,})\.rar$",
-            RegexOptions.IgnoreCase);
-        if (partRarMatch.Success)
-        {
-            if (int.TryParse(partRarMatch.Groups[1].Value, out int partNum))
-            {
-                return partNum >= 2; // part01 是首卷，part02+ 跳过
-            }
-        }
+        var partRarMatch = Regex.Match(fileName, @"\.part(\d{2,})\.rar$", RegexOptions.IgnoreCase);
+        if (partRarMatch.Success && int.TryParse(partRarMatch.Groups[1].Value, out int partNum))
+            return partNum >= 2;
 
-        // === 2. ZIP 分卷: xxx.zNN （NN >= 01）===
-        // 注意：首卷是 .zip，不是 .z00
-        var zipVolMatch = Regex.Match(
-            fileName,
-            @"\.z(\d{2})$",
-            RegexOptions.IgnoreCase);
-        if (zipVolMatch.Success)
-        {
-            // 所有 .zXX 都是非首卷（因为首卷是 .zip）
+        if (Regex.IsMatch(fileName, @"\.z\d{2}$", RegexOptions.IgnoreCase))
             return true;
-        }
 
-        // === 3. RAR 旧格式: xxx.rNN （NN >= 00）===
-        // 首卷是 .rar，.r00 是第二卷
-        var rarVolMatch = Regex.Match(
-            fileName,
-            @"\.r(\d{2})$",
-            RegexOptions.IgnoreCase);
-        if (rarVolMatch.Success)
-        {
-            // 所有 .rXX 都是非首卷
+        if (Regex.IsMatch(fileName, @"\.r\d{2}$", RegexOptions.IgnoreCase))
             return true;
-        }
 
-        // === 4. 通用数字分卷: xxx.7z.001, xxx.zip.002 等 ===
-        // 匹配结尾为 .DDD（三位数字），且 DDD != "001"
-        var genericVolMatch = Regex.Match(
-            fileName,
-            @"\.(00[2-9]|0[1-9]\d|[1-9]\d{2})$");
+        var genericVolMatch = Regex.Match(fileName, @"\.(00[2-9]|0[1-9]\d|[1-9]\d{2})$");
         if (genericVolMatch.Success)
         {
             string baseName = fileName[..^genericVolMatch.Length];
             string baseExt = Path.GetExtension(baseName).ToLowerInvariant();
             var archiveExts = new HashSet<string> { ".7z", ".zip", ".rar", ".tar", ".gz", ".bz2", ".xz" };
             if (archiveExts.Contains(baseExt))
-            {
                 return true;
-            }
         }
 
         return false;
@@ -490,4 +477,6 @@ public class ArchiveProcessor
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
         return ext is ".mp4" or ".mov" or ".avi" or ".mkv" or ".wmv" or ".jpg" or ".jpeg" or ".png" or ".bmp" or ".gif" or ".webp" or ".pdf" or ".doc" or ".docx" or ".zip" or ".7z" or ".rar";
     }
+
+    #endregion
 }
