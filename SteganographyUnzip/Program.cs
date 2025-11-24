@@ -82,7 +82,7 @@ internal class Program
             string? clipboardPassword = null;
             if (parseResult.GetValue(optionUseClipboard))
             {
-                clipboardPassword = ClipboardHelper.TryGetText();
+                clipboardPassword = ClipboardHelper.TryGetText()?.Trim();
                 if (!string.IsNullOrEmpty(clipboardPassword))
                 {
                     Console.WriteLine($"📋 使用剪贴板密码: {clipboardPassword}");
