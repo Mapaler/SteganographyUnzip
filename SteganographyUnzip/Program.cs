@@ -31,27 +31,9 @@ internal class Program
         Description = "指定解压程序",
         CompletionSources = { "bz", "7z", "7za" }
     };
-    private static readonly Option<List<string>> optionTryPasswords = new("--try-passwords")
+    private static readonly Option<FileInfo> optionPasswordFile = new("--password-file", "-f")
     {
-        Description = "自动尝试多个密码，用英文逗号分隔",
-        Arity = ArgumentArity.ZeroOrOne,
-        CustomParser = (tokenResult) =>
-        {
-            if (tokenResult.Tokens.Count == 0)
-                return null;
-            string raw = tokenResult.Tokens[0].Value;
-            string[] parts = raw.Split([','], StringSplitOptions.RemoveEmptyEntries);
-            List<string> passwords = [];
-            foreach (string part in parts)
-            {
-                string trimmed = part.Trim();
-                if (!string.IsNullOrEmpty(trimmed))
-                {
-                    passwords.Add(trimmed);
-                }
-            }
-            return passwords;
-        }
+        Description = "从文本文件读取密码列表（每行一个密码）"
     };
 
     private static readonly RootCommand rootCommand = new(
@@ -63,7 +45,7 @@ internal class Program
         optionOutputDirectory,
         optionTempDirectory,
         optionExeType,
-        optionTryPasswords
+        optionPasswordFile
     };
 
     static int Main(string[] args)
@@ -84,7 +66,28 @@ internal class Program
             DirectoryInfo? userOutputDir = parseResult.GetValue(optionOutputDirectory); // 用户指定的（可能为 null）
             DirectoryInfo tempDir = parseResult.GetValue(optionTempDirectory)!;
             string? exeName = parseResult.GetValue(optionExeType);
-            List<string>? additionalPasswords = parseResult.GetValue(optionTryPasswords);
+
+            // ✅ 从文件读取密码列表
+            List<string> passwordList = new List<string>();
+            if (parseResult.GetValue(optionPasswordFile) is FileInfo passwordFile)
+            {
+                try
+                {
+                    // 读取文件并过滤空行
+                    var lines = File.ReadLines(passwordFile.FullName)
+                                    .Select(line => line.Trim())
+                                    .Where(line => !string.IsNullOrEmpty(line))
+                                    .ToList();
+
+                    passwordList.AddRange(lines);
+                    Console.WriteLine($"🔑 从文件读取 {lines.Count} 个密码: {passwordFile.FullName}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ 读取密码文件失败: {ex.Message}");
+                    return 1;
+                }
+            }
 
             // 确保临时目录存在
             if (!tempDir.Exists)
@@ -109,7 +112,7 @@ internal class Program
                         outputDirectory: finalOutputDir.FullName,
                         tempDirectory: tempDir.FullName,
                         userProvidedPassword: password,
-                        additionalPasswords: additionalPasswords,
+                        additionalPasswords: passwordList,
                         userSpecifiedExtractor: exeName
                     );
 

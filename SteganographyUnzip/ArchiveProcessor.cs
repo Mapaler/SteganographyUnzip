@@ -10,14 +10,14 @@ public class ArchiveProcessor
     private readonly DirectoryInfo _outputDir;
     private readonly DirectoryInfo _tempDir;
     private readonly string? _userProvidedPassword;
-    private readonly IReadOnlyList<string>? _additionalPasswords;
+    private readonly List<string>? _additionalPasswords;
     private readonly string? _userSpecifiedExtractor;
 
     public ArchiveProcessor(
         string outputDirectory,
         string tempDirectory,
         string? userProvidedPassword = null,
-        IReadOnlyList<string>? additionalPasswords = null,
+        List<string>? additionalPasswords = null,
         string? userSpecifiedExtractor = null)
     {
         _outputDir = new DirectoryInfo(outputDirectory);
@@ -64,7 +64,13 @@ public class ArchiveProcessor
 
                 Console.WriteLine($"\n📦 处理: {currentFile.Name} ({currentFile.Length / 1024 / 1024} MiB)");
 
-                var candidates = GetCandidatePasswords(currentFile, inheritedPassword);
+                var passwordProvider = new PasswordCandidateProvider();
+                var passwordCandidates = passwordProvider.GetCandidatePasswords(
+                    _userProvidedPassword,
+                    inputPath,
+                    inheritedPassword, // 从上层传入的继承密码
+                    _additionalPasswords
+                );
                 var strategy = CreateStrategy(extractor.Type);
 
                 // 创建本次解压专用的临时子目录
@@ -118,7 +124,7 @@ public class ArchiveProcessor
 
                     // === 2. 尝试 Extract（试所有密码）===
                     string? effectivePassword = await TryExtractWithCandidatesAsync(
-                        currentFile, extractor, strategy, tempExtractDir, candidates, cancellationToken);
+                        currentFile, extractor, strategy, tempExtractDir, passwordCandidates, cancellationToken);
 
                     if (effectivePassword == null)
                         throw new InvalidOperationException("无法解压当前压缩包");
