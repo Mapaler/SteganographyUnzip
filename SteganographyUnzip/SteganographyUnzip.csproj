@@ -9,7 +9,12 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <AssemblyName>suz</AssemblyName>
     <AssemblyTitle>隐写压缩包解压</AssemblyTitle>
+    <ApplicationIcon>7z001.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="7z001.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="System.CommandLine" Version="2.0.0" />
