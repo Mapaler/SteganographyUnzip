@@ -1,17 +1,21 @@
 // ProcessHelper.cs
 using System.Diagnostics;
 using System.Text;
+using SteganographyUnzip;
 
 namespace SteganographyUnzip;
 
 public static class ProcessHelper
 {
+    private const string Separator = "──────────────────────────────────────";
+
     public static async Task<(int ExitCode, string Output, string Error)> ExecuteAsync(
         string fileName,
         string arguments,
         bool showOutput = true,
         CancellationToken ct = default)
     {
+        // 使用 ConsoleHelper.Debug 替代原 ConsoleHelper.Debug（带条件编译）
         ConsoleHelper.Debug($"执行命令: {fileName} {arguments}");
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -36,12 +40,22 @@ public static class ProcessHelper
         var outputBuilder = new StringBuilder();
         var errorBuilder = new StringBuilder();
 
+        if (showOutput)
+        {
+            // ===== 显示外部程序输出开始 =====
+            Console.WriteLine(Separator);
+            Console.WriteLine($"[外部程序] {Path.GetFileName(fileName)} {arguments}");
+            Console.WriteLine(Separator);
+        }
+
         void OnOutputDataReceived(object sender, DataReceivedEventArgs e)
         {
             if (e.Data != null)
             {
                 if (showOutput)
-                    Console.WriteLine(e.Data);
+                {
+                    Console.WriteLine(e.Data); // stdout → Console.Out
+                }
                 outputBuilder.AppendLine(e.Data);
             }
         }
@@ -51,7 +65,9 @@ public static class ProcessHelper
             if (e.Data != null)
             {
                 if (showOutput)
-                    Console.Error.WriteLine(e.Data);
+                {
+                    Console.Error.WriteLine(e.Data); // stderr → Console.Error
+                }
                 errorBuilder.AppendLine(e.Data);
             }
         }
@@ -61,7 +77,6 @@ public static class ProcessHelper
 
         process.Start();
         process.StandardInput.Close(); // 防止等待输入
-
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
@@ -76,6 +91,12 @@ public static class ProcessHelper
         }
 
         process.WaitForExit();
+
+        if (showOutput)
+        {
+            // ===== 显示外部程序输出结束 =====
+            Console.WriteLine(Separator);
+        }
 
         return (process.ExitCode, outputBuilder.ToString(), errorBuilder.ToString());
     }

@@ -65,5 +65,5 @@ public static class ConsoleHelper
     public static void Debug(string message)
         => WriteLineStyled(
             ("[DEBUG] ", ConsoleColor.Red, ConsoleColor.White),
-            ($" {message}", ConsoleColor.Gray, null));
+            ($" {message}", ConsoleColor.White, ConsoleColor.Black));
 }
