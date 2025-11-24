@@ -2,9 +2,16 @@
 
 网友都用的各种多层隐写压缩包，解压起来特别麻烦，于是写个自动化一点的工具。
 
-为了开发快，程序编码基本使用 [千问AI](https://www.qianwen.com/) 完成，我主要负责 Debug 和逻辑梳理。
+为了开发快，程序编码基本使用 [千问AI](https://www.qianwen.com/) 完成，我主要负责 Debug 和逻辑梳理。（其实我也不会这些高级写法）
 
-## 用法
+## 推荐用法
+在 Total Commander 里设置`suz -t R:\RamDiskFolder\ -o %T %P%S`，可以将当前选中文件解压到对面文件夹。当然需要你的文件名里有密码，或者使用`--password-file`传入文本文件。
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/81efac16-48de-4810-b5e5-a819c55b78ff" width="70%" poster=""> </video>
+</div>
+
+## 详细用法
 <pre>
 Description:
   自动解压隐写 MP4 压缩包和多层压缩包。
@@ -19,7 +26,7 @@ Arguments:
 Options:
   -p, --password <password>        解压密码
   -o, --output-dir <output-dir>    最终解压目标目录，默认为压缩包同目录
-  -temp, --temp-dir <temp-dir>     多层压缩包中间文件临时暂存目录（有条件可设置到内存盘减少磁盘磨损） [default: %LocalAppData%\Temp\]
+  -t, --temp-dir <temp-dir>        多层压缩包中间文件临时暂存目录（有条件可设置到内存盘，以减少磁盘磨损） [default: C:\Users\Mapaler\AppData\Local\Temp\]
   -exe <7z|7za|bz|NanaZipC>        指定解压程序
   --password-file <password-file>  从文本文件读取密码列表（每行一个密码）
   --delete-orig-file               【危险！】解压完成后删除原始文件
@@ -42,3 +49,4 @@ Options:
    1. 当前目录下的 bz
    2. 环境变量的 bz
    3. Windows 默认安装位置的 bz
+
