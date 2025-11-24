@@ -10,6 +10,8 @@
     <AssemblyName>suz</AssemblyName>
     <AssemblyTitle>隐写压缩包解压</AssemblyTitle>
     <ApplicationIcon>7z001.ico</ApplicationIcon>
+    <VersionPrefix>1.1.0</VersionPrefix>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>

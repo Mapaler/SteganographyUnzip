@@ -11,21 +11,24 @@ public class ArchiveProcessor
     private readonly DirectoryInfo _tempDir;
     private readonly string? _userProvidedPassword;
     private readonly List<string>? _additionalPasswords;
+    private readonly string? _clipboardPassword; // ✅ 新增字段
     private readonly string? _userSpecifiedExtractor;
     private readonly bool _deleteOriginalFile;
 
     public ArchiveProcessor(
         string outputDirectory,
         string tempDirectory,
-        string? userProvidedPassword = null,
-        List<string>? additionalPasswords = null,
-        string? userSpecifiedExtractor = null,
-        bool deleteOriginalFile = false)
+        string? userProvidedPassword,
+        List<string>? additionalPasswords,
+        string? clipboardPassword, // ✅ 新增参数
+        string? userSpecifiedExtractor,
+        bool deleteOriginalFile)
     {
         _outputDir = new DirectoryInfo(outputDirectory);
         _tempDir = new DirectoryInfo(tempDirectory);
         _userProvidedPassword = userProvidedPassword;
         _additionalPasswords = additionalPasswords;
+        _clipboardPassword = clipboardPassword; // ✅ 初始化
         _userSpecifiedExtractor = userSpecifiedExtractor;
         _deleteOriginalFile = deleteOriginalFile;
     }
@@ -72,7 +75,8 @@ public class ArchiveProcessor
                     _userProvidedPassword,
                     inputPath,
                     inheritedPassword, // 从上层传入的继承密码
-                    _additionalPasswords
+                    _additionalPasswords,
+                    _clipboardPassword // ✅ 传递剪贴板密码
                 );
                 var strategy = CreateStrategy(extractor.Type);
 
@@ -287,22 +291,24 @@ public class ArchiveProcessor
 
         if (fileList.Count == 1)
         {
-            string filePath = fileList[0];
-            string fileName = Path.GetFileName(filePath);
-            string ext = Path.GetExtension(fileName);
+            //一个文件就可能是各种奇怪的扩展名的压缩包
+            return true;
+            //string filePath = fileList[0];
+            //string fileName = Path.GetFileName(filePath);
+            //string ext = Path.GetExtension(fileName);
 
-            if (archiveExtensions.Contains(ext) || stegoCarrierExtensions.Contains(ext))
-                return true;
+            //if (archiveExtensions.Contains(ext) || stegoCarrierExtensions.Contains(ext))
+            //    return true;
 
-            if (fileName.EndsWith(".001", StringComparison.OrdinalIgnoreCase))
-            {
-                string baseName = Path.GetFileNameWithoutExtension(fileName);
-                string baseExt = Path.GetExtension(baseName);
-                if (archiveExtensions.Contains(baseExt))
-                    return true;
-            }
+            //if (fileName.EndsWith(".001", StringComparison.OrdinalIgnoreCase))
+            //{
+            //    string baseName = Path.GetFileNameWithoutExtension(fileName);
+            //    string baseExt = Path.GetExtension(baseName);
+            //    if (archiveExtensions.Contains(baseExt))
+            //        return true;
+            //}
 
-            return false;
+            //return false;
         }
 
         foreach (string filePath in fileList)

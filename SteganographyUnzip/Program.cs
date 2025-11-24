@@ -40,6 +40,11 @@ internal class Program
         Description = "【危险！】解压完成后删除原始文件",
         DefaultValueFactory = parseResult => false
     };
+    private static readonly Option<bool> optionUseClipboard = new("--use-clipboard")
+    {
+        Description = "从剪贴板读取密码（需为纯文本）",
+        DefaultValueFactory = _ => false
+    };
 
     private static readonly RootCommand rootCommand = new(
         $"自动解压隐写 MP4 压缩包和多层压缩包。{Environment.NewLine}" +
@@ -51,7 +56,8 @@ internal class Program
         optionTempDirectory,
         optionExeType,
         optionPasswordFile,
-        optionDeleteOriginalFile
+        optionDeleteOriginalFile,
+        optionUseClipboard
     };
 
     static int Main(string[] args)
@@ -73,7 +79,20 @@ internal class Program
             DirectoryInfo tempDir = parseResult.GetValue(optionTempDirectory)!;
             string? exeName = parseResult.GetValue(optionExeType);
             bool deleteOriginalFile = parseResult.GetValue(optionDeleteOriginalFile);
-            
+            string? clipboardPassword = null;
+            if (parseResult.GetValue(optionUseClipboard))
+            {
+                clipboardPassword = ClipboardHelper.TryGetText();
+                if (!string.IsNullOrEmpty(clipboardPassword))
+                {
+                    Console.WriteLine($"📋 使用剪贴板密码: {clipboardPassword}");
+                }
+                else
+                {
+                    Console.WriteLine("📋 剪贴板为空或无法读取");
+                }
+            }
+
 
             // ✅ 从文件读取密码列表
             List<string> passwordList = new List<string>();
@@ -121,6 +140,7 @@ internal class Program
                         tempDirectory: tempDir.FullName,
                         userProvidedPassword: password,
                         additionalPasswords: passwordList,
+                        clipboardPassword: clipboardPassword, // ✅ 传递剪贴板密码
                         userSpecifiedExtractor: exeName,
                         deleteOriginalFile: deleteOriginalFile
                     );

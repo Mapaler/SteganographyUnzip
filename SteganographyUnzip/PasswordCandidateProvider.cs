@@ -15,24 +15,29 @@ namespace SteganographyUnzip
             string? userProvidedPassword,
             string? path,
             string? inheritedPassword,
-            List<string>? additionalPasswords)
+            List<string>? additionalPasswords,
+            string? clipboardPassword) // ✅ 新增参数
         {
             var candidates = new List<string>();
 
-            // 1. 继承的密码
-            if (!string.IsNullOrEmpty(inheritedPassword))
-                candidates.Add(inheritedPassword);
-
-            // 2. 命令行指定的密码 (最高优先级)
+            // 1. 命令行指定的密码 (最高优先级)
             if (!string.IsNullOrEmpty(userProvidedPassword))
                 candidates.Add(userProvidedPassword);
 
-            // 3. 从路径中提取的密码
+            // 2. 从路径中提取的密码
             string? pwdFromPath = ExtractPasswordFromPath(path);
             if (!string.IsNullOrEmpty(pwdFromPath))
                 candidates.Add(pwdFromPath);
 
-            // 4. 额外密码列表
+            // 3. 剪贴板密码
+            if (!string.IsNullOrEmpty(clipboardPassword))
+                candidates.Add(clipboardPassword);
+
+            // 4. 继承的密码
+            if (!string.IsNullOrEmpty(inheritedPassword))
+                candidates.Add(inheritedPassword);
+
+            // 5. 额外密码列表
             if (additionalPasswords != null)
             {
                 foreach (var pwd in additionalPasswords)
