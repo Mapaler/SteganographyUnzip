@@ -15,6 +15,9 @@ public static class ProcessHelper
     {
         DebugLog($"执行命令: {fileName} {arguments}");
 
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        linkedCts.CancelAfter(TimeSpan.FromMinutes(2)); // ⏱️ 2分钟超时
+
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -25,7 +28,7 @@ public static class ProcessHelper
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-                RedirectStandardInput = true, // 👈 关键：显式重定向 stdin
+                RedirectStandardInput = true,
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8
             }
@@ -58,15 +61,22 @@ public static class ProcessHelper
         process.ErrorDataReceived += OnErrorDataReceived;
 
         process.Start();
-
-        // 👇 关键：立即关闭 stdin，防止程序等待输入（如密码错误时）
-        process.StandardInput.Close();
+        process.StandardInput.Close(); // 防止等待输入
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        await process.WaitForExitAsync(ct);
-        process.WaitForExit(); // 确保缓冲区读完
+        try
+        {
+            await process.WaitForExitAsync(linkedCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            process.Kill();
+            throw new TimeoutException("命令执行超时");
+        }
+
+        process.WaitForExit();
 
         return (process.ExitCode, outputBuilder.ToString(), errorBuilder.ToString());
     }

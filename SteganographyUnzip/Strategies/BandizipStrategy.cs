@@ -1,7 +1,6 @@
 // BandizipStrategy.cs
 using System.Diagnostics;
 using System.Text;
-
 namespace SteganographyUnzip;
 
 public class BandizipStrategy : IExtractorStrategy
@@ -12,7 +11,7 @@ public class BandizipStrategy : IExtractorStrategy
     {
         var args = new StringBuilder("x");
         if (!string.IsNullOrEmpty(password))
-            args.AppendFormat(" -p:{0}", password); // 注意 bz 的语法是 -p:密码（无引号）
+            args.AppendFormat(" -p:\"{0}\"", password); // Bandizip 语法：-p:密码（无引号）
         args.AppendFormat(" -o:\"{0}\"", outputDir.FullName);
         args.Append(" -y");
         args.AppendFormat(" \"{0}\"", archive.FullName);
@@ -25,36 +24,8 @@ public class BandizipStrategy : IExtractorStrategy
         IReadOnlyList<string> candidatePasswords,
         CancellationToken ct)
     {
-        // 1. 先尝试无密码
-        try
-        {
-            string args = $"l \"{archive.FullName}\"";
-            var (exitCode, output, error) = await ProcessHelper.ExecuteAsync(commandName, args, showOutput: false, ct);
-            if (exitCode == 0)
-            {
-                return ArchiveContentParser.ParseBandizip(output);
-            }
-            else if (IsPasswordRequiredFromOutput(error))
-            {
-                // continue
-            }
-            else
-            {
-                throw new InvalidOperationException($"Bandizip 列表失败: {error}");
-            }
-        }
-        catch (Exception ex) when (IsPasswordRequired(ex))
-        {
-            // fallback
-        }
-
-        // 2. 尝试密码
-        var allCandidates = new List<string>(candidatePasswords ?? Enumerable.Empty<string>())
-    {
-        string.Empty
-    }.Distinct().ToList();
-
-        foreach (string pwd in allCandidates)
+        // 尝试每个候选密码（包括空密码）
+        foreach (string pwd in candidatePasswords)
         {
             try
             {
@@ -62,49 +33,32 @@ public class BandizipStrategy : IExtractorStrategy
                 Console.WriteLine($"🔍 List 尝试密码: {pwdDisplay}");
 
                 string safePwd = pwd.Replace("\"", "\"\"");
-                string args = $"l -p:{safePwd} \"{archive.FullName}\"";
+                string args = $"l -p:\"{safePwd}\" \"{archive.FullName}\"";
 
                 var (exitCode, output, error) = await ProcessHelper.ExecuteAsync(commandName, args, showOutput: false, ct);
 
                 if (exitCode == 0)
                 {
                     var files = ArchiveContentParser.ParseBandizip(output);
-                    if (files.Count > 0 || output.Contains("Listing archive"))
-                    {
-                        return files;
-                    }
+                    return files;
                 }
 
+                // 密码错误，继续尝试
                 if (IsWrongPasswordFromOutput(error))
                 {
                     continue;
                 }
 
-                throw new InvalidOperationException($"Bandizip 列表出错: {error}");
+                // 其他错误直接抛出
+                throw new InvalidOperationException($"Bandizip 列表失败 ({exitCode}): {error.Trim()}");
             }
-            catch (Exception ex)
+            catch (Exception ex) when (IsWrongPassword(ex))
             {
-                if (IsWrongPassword(ex))
-                {
-                    continue;
-                }
-                throw;
+                continue;
             }
         }
 
         throw new InvalidOperationException("无法列出压缩包内容：所有密码均无效");
-    }
-
-    // 兼容旧接口（可选，建议移除或标记 Obsolete）
-    public Task<List<string>> ListContentsAsync(FileInfo archive, string commandName, CancellationToken ct)
-        => throw new NotSupportedException("请使用带 candidatePasswords 的重载");
-
-    private static bool IsPasswordRequired(Exception ex)
-    {
-        string msg = ex.Message;
-        return msg.Contains("Enter password") ||
-               msg.Contains("Invalid password") ||
-               msg.Contains("User break");
     }
 
     private static bool IsWrongPassword(Exception ex)
@@ -112,10 +66,6 @@ public class BandizipStrategy : IExtractorStrategy
         string msg = ex.Message;
         return msg.Contains("Invalid password");
     }
-
-    private static bool IsPasswordRequiredFromOutput(string error) =>
-    error.Contains("password is required", StringComparison.OrdinalIgnoreCase) ||
-    error.Contains("encrypted", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsWrongPasswordFromOutput(string error) =>
         error.Contains("Wrong password", StringComparison.OrdinalIgnoreCase) ||

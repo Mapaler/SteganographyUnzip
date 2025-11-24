@@ -80,7 +80,7 @@ internal class Program
         rootCommand.SetAction(async (parseResult, cancellationToken) =>
         {
             FileInfo[] archives = parseResult.GetValue(argumentPaths)!;
-            string password = parseResult.GetValue(optionPassword) ?? string.Empty;
+            string? password = parseResult.GetValue(optionPassword);
             DirectoryInfo? userOutputDir = parseResult.GetValue(optionOutputDirectory); // 用户指定的（可能为 null）
             DirectoryInfo tempDir = parseResult.GetValue(optionTempDirectory)!;
             string? exeName = parseResult.GetValue(optionExeType);
