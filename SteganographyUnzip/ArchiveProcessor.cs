@@ -64,6 +64,7 @@ public class ArchiveProcessor
                     // === 1. 智能 List（仅用于预览）优先用继承密码，再用空密码===
                     List<string> fileList = new();
                     string? listPasswordUsed = null;
+                    bool isRecognizedAsArchive = false;
 
                     // 尝试顺序：继承密码 -> 空密码
                     var listTryPasswords = new List<string>();
@@ -79,20 +80,30 @@ public class ArchiveProcessor
                                 currentFile, extractor.CommandName, new[] { pwd }, cancellationToken);
                             fileList = tempFileList;
                             listPasswordUsed = pwd;
+                            isRecognizedAsArchive = true;
                             break; // 一旦成功就停
                         }
                         catch (Exception ex)
                         {
-                            // 如果是密码错误，继续试下一个；否则抛出
                             if (IsPasswordRelatedError(ex.Message))
                             {
-                                continue;
+                                continue; // 密码错误，试下一个
                             }
                             else
                             {
-                                throw; // 非密码错误，直接抛
+                                // 可能是非压缩文件（如纯MP4），先记录，不立即抛出
+                                // 继续尝试其他密码（虽然大概率都失败）
                             }
                         }
+                    }
+
+                    // 如果所有密码都无法识别为压缩包，且文件是隐写载体类型 → 视为最终文件
+                    if (!isRecognizedAsArchive && IsSteganographyCarrier(currentFile.Name))
+                    {
+                        Console.WriteLine($"📄 \"{currentFile.Name}\" 无法作为压缩包打开，视为最终内容文件。");
+                        MoveFileToOutput(currentFile, finalOutput);
+                        Console.WriteLine($"✅ 已保存到: {finalOutput.FullName}");
+                        continue; // 跳过解压，处理下一个队列项
                     }
 
                     Console.WriteLine($"📄 内容预览 (使用密码: {(string.IsNullOrEmpty(listPasswordUsed) ? "(空)" : listPasswordUsed)}): " +
@@ -265,7 +276,7 @@ public class ArchiveProcessor
 
         return false;
     }
-
+    //移动所有文件
     private static void MoveFilesToOutput(DirectoryInfo source, DirectoryInfo target)
     {
         foreach (var file in source.GetFiles("*", SearchOption.AllDirectories))
@@ -363,10 +374,9 @@ public class ArchiveProcessor
         if (string.IsNullOrEmpty(message))
             return false;
         string msg = message.ToLowerInvariant();
-        return msg.Contains("password") ||
-               msg.Contains("wrong") ||
-               msg.Contains("invalid") ||
-               msg.Contains("needed") ||
+        return msg.Contains("wrong password") ||
+               msg.Contains("invalid password") ||
+               msg.Contains("password is incorrect") ||
                msg.Contains("headers error") ||
                msg.Contains("data error") ||
                msg.Contains("cannot open encrypted") ||
@@ -438,5 +448,29 @@ public class ArchiveProcessor
 
         // 其他情况：不是分卷，或为首部分卷（如 .zip, .rar, .7z.001, .part01.rar）
         return false;
+    }
+
+    private static bool IsSteganographyCarrier(string fileName)
+    {
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        return ext is ".mp4" or ".mov" or ".avi" or ".mkv" or ".wmv" or ".jpg" or ".jpeg" or ".png" or ".bmp" or ".gif" or ".webp" or ".pdf" or ".doc" or ".docx" or ".zip" or ".7z" or ".rar";
+    }
+    //移动单个文件
+    private static void MoveFileToOutput(FileInfo sourceFile, DirectoryInfo targetDir)
+    {
+        Directory.CreateDirectory(targetDir.FullName);
+        string destPath = Path.Combine(targetDir.FullName, sourceFile.Name);
+
+        // 防止重名
+        int counter = 1;
+        while (File.Exists(destPath))
+        {
+            string nameWithoutExt = Path.GetFileNameWithoutExtension(sourceFile.Name);
+            string ext = Path.GetExtension(sourceFile.Name);
+            destPath = Path.Combine(targetDir.FullName, $"{nameWithoutExt} ({counter}){ext}");
+            counter++;
+        }
+
+        sourceFile.MoveTo(destPath, overwrite: true);
     }
 }
