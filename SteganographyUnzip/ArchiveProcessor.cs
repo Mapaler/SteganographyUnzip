@@ -137,16 +137,44 @@ public class ArchiveProcessor
 
                             queue.Enqueue((file, finalOutput, effectivePassword));
                         }
+
+                        // ✅ 关键：已将子文件入队，当前临时目录可安全删除
+                        try
+                        {
+                            if (tempExtractDir.Exists)
+                            {
+                                tempExtractDir.Delete(recursive: true);
+                                ConsoleHelper.Debug($"🗑️ 已清理中间临时目录: {tempExtractDir.Name}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"⚠️ 无法删除临时目录 {tempExtractDir.Name}: {ex.Message}");
+                        }
                     }
                     else
                     {
                         MoveFilesToOutput(tempExtractDir, finalOutput);
                         Console.WriteLine($"✅ 已解压到: {finalOutput.FullName}");
+
+                        // ✅ 清理已输出的临时目录（应为空）
+                        try
+                        {
+                            if (tempExtractDir.Exists && !tempExtractDir.EnumerateFileSystemInfos().Any())
+                            {
+                                tempExtractDir.Delete();
+                                ConsoleHelper.Debug($"🗑️ 已清理最终临时目录: {tempExtractDir.Name}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            // 忽略删除失败
+                        }
                     }
                 }
                 finally
                 {
-                    // 暂时不删，留到成功结束统一删
+                    // 不在此处统一清理，每个 tempExtractDir 已在分支中处理
                 }
             }
 
@@ -155,25 +183,13 @@ public class ArchiveProcessor
         }
         finally
         {
-            if (completedSuccessfully)
+            // ❌ 不再删除 _tempDir 本身（它可能是系统 Temp 目录！）
+            // ✅ 所有子目录应在使用后立即清理
+            if (!completedSuccessfully)
             {
-                try
-                {
-                    if (_tempDir.Exists)
-                    {
-                        ConsoleHelper.Debug($"🗑️ 清理全部临时目录: {_tempDir.FullName}");
-                        _tempDir.Delete(true);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"⚠️ 无法清理临时目录: {ex.Message}");
-                }
+                Console.WriteLine($"ℹ️ 异常发生，部分临时子目录可能保留在: {_tempDir.FullName}");
             }
-            else
-            {
-                Console.WriteLine($"ℹ️ 异常发生，临时目录已保留用于调试: {_tempDir.FullName}");
-            }
+            // 否则：全部已清理，无需操作
         }
     }
 
@@ -182,7 +198,7 @@ public class ArchiveProcessor
         var candidates = new List<string>();
 
         // 1. 用户显式提供的密码（即使为空也加入）
-        if (_userProvidedPassword != null) // 注意：这里允许空字符串
+        if (_userProvidedPassword != null)
             candidates.Add(_userProvidedPassword);
 
         // 2. 从文件名/路径中提取的密码
@@ -200,12 +216,12 @@ public class ArchiveProcessor
         // 5. 显式添加空密码（用于尝试无密码情况）
         candidates.Add("");
 
-        // 去重，但保留首次出现的顺序（使用 DistinctBy 或手动去重）
+        // 去重，但保留首次出现的顺序
         var seen = new HashSet<string>();
         var uniqueCandidates = new List<string>();
         foreach (var pwd in candidates)
         {
-            if (seen.Add(pwd)) // Add returns true if not already present
+            if (seen.Add(pwd))
             {
                 uniqueCandidates.Add(pwd);
             }
@@ -221,17 +237,17 @@ public class ArchiveProcessor
             return false;
 
         var archiveExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ".7z", ".zip", ".rar", ".tar", ".gz", ".bz2", ".xz"
-    };
+        {
+            ".7z", ".zip", ".rar", ".tar", ".gz", ".bz2", ".xz"
+        };
 
         var stegoCarrierExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp",
-        ".mp4", ".mov", ".avi", ".mkv", ".wmv",
-        ".wav", ".mp3", ".flac",
-        ".pdf"
-    };
+        {
+            ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp",
+            ".mp4", ".mov", ".avi", ".mkv", ".wmv",
+            ".wav", ".mp3", ".flac",
+            ".pdf"
+        };
 
         // 情况 1：单文件
         if (fileList.Count == 1)
@@ -276,7 +292,8 @@ public class ArchiveProcessor
 
         return false;
     }
-    //移动所有文件
+
+    // 移动所有文件（递归）
     private static void MoveFilesToOutput(DirectoryInfo source, DirectoryInfo target)
     {
         foreach (var file in source.GetFiles("*", SearchOption.AllDirectories))
@@ -286,6 +303,25 @@ public class ArchiveProcessor
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             file.MoveTo(dest, true);
         }
+    }
+
+    // 移动单个文件
+    private static void MoveFileToOutput(FileInfo sourceFile, DirectoryInfo targetDir)
+    {
+        Directory.CreateDirectory(targetDir.FullName);
+        string destPath = Path.Combine(targetDir.FullName, sourceFile.Name);
+
+        // 防止重名
+        int counter = 1;
+        while (File.Exists(destPath))
+        {
+            string nameWithoutExt = Path.GetFileNameWithoutExtension(sourceFile.Name);
+            string ext = Path.GetExtension(sourceFile.Name);
+            destPath = Path.Combine(targetDir.FullName, $"{nameWithoutExt} ({counter}){ext}");
+            counter++;
+        }
+
+        sourceFile.MoveTo(destPath, overwrite: true);
     }
 
     private IExtractorStrategy CreateStrategy(ExtractorType type)
@@ -369,6 +405,7 @@ public class ArchiveProcessor
         }
     }
     #endregion
+
     private static bool IsPasswordRelatedError(string message)
     {
         if (string.IsNullOrEmpty(message))
@@ -393,10 +430,10 @@ public class ArchiveProcessor
             return false;
 
         // === 1. RAR 新格式: xxx.partNN.rar （NN >= 02）===
-        var partRarMatch = System.Text.RegularExpressions.Regex.Match(
+        var partRarMatch = Regex.Match(
             fileName,
             @"\.part(\d{2,})\.rar$",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            RegexOptions.IgnoreCase);
         if (partRarMatch.Success)
         {
             if (int.TryParse(partRarMatch.Groups[1].Value, out int partNum))
@@ -407,10 +444,10 @@ public class ArchiveProcessor
 
         // === 2. ZIP 分卷: xxx.zNN （NN >= 01）===
         // 注意：首卷是 .zip，不是 .z00
-        var zipVolMatch = System.Text.RegularExpressions.Regex.Match(
+        var zipVolMatch = Regex.Match(
             fileName,
             @"\.z(\d{2})$",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            RegexOptions.IgnoreCase);
         if (zipVolMatch.Success)
         {
             // 所有 .zXX 都是非首卷（因为首卷是 .zip）
@@ -419,10 +456,10 @@ public class ArchiveProcessor
 
         // === 3. RAR 旧格式: xxx.rNN （NN >= 00）===
         // 首卷是 .rar，.r00 是第二卷
-        var rarVolMatch = System.Text.RegularExpressions.Regex.Match(
+        var rarVolMatch = Regex.Match(
             fileName,
             @"\.r(\d{2})$",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            RegexOptions.IgnoreCase);
         if (rarVolMatch.Success)
         {
             // 所有 .rXX 都是非首卷
@@ -431,22 +468,20 @@ public class ArchiveProcessor
 
         // === 4. 通用数字分卷: xxx.7z.001, xxx.zip.002 等 ===
         // 匹配结尾为 .DDD（三位数字），且 DDD != "001"
-        var genericVolMatch = System.Text.RegularExpressions.Regex.Match(
+        var genericVolMatch = Regex.Match(
             fileName,
-            @"\.(00[2-9]|0[1-9]\d|[1-9]\d{2})$"); // 匹配 002~999
+            @"\.(00[2-9]|0[1-9]\d|[1-9]\d{2})$");
         if (genericVolMatch.Success)
         {
-            // 进一步确认前面是压缩格式（可选，但更安全）
-            string baseName = fileName[..^genericVolMatch.Length]; // 移除 .002 等
+            string baseName = fileName[..^genericVolMatch.Length];
             string baseExt = Path.GetExtension(baseName).ToLowerInvariant();
             var archiveExts = new HashSet<string> { ".7z", ".zip", ".rar", ".tar", ".gz", ".bz2", ".xz" };
             if (archiveExts.Contains(baseExt))
             {
-                return true; // 是 .002+ 的压缩分卷 → 跳过
+                return true;
             }
         }
 
-        // 其他情况：不是分卷，或为首部分卷（如 .zip, .rar, .7z.001, .part01.rar）
         return false;
     }
 
@@ -454,23 +489,5 @@ public class ArchiveProcessor
     {
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
         return ext is ".mp4" or ".mov" or ".avi" or ".mkv" or ".wmv" or ".jpg" or ".jpeg" or ".png" or ".bmp" or ".gif" or ".webp" or ".pdf" or ".doc" or ".docx" or ".zip" or ".7z" or ".rar";
-    }
-    //移动单个文件
-    private static void MoveFileToOutput(FileInfo sourceFile, DirectoryInfo targetDir)
-    {
-        Directory.CreateDirectory(targetDir.FullName);
-        string destPath = Path.Combine(targetDir.FullName, sourceFile.Name);
-
-        // 防止重名
-        int counter = 1;
-        while (File.Exists(destPath))
-        {
-            string nameWithoutExt = Path.GetFileNameWithoutExtension(sourceFile.Name);
-            string ext = Path.GetExtension(sourceFile.Name);
-            destPath = Path.Combine(targetDir.FullName, $"{nameWithoutExt} ({counter}){ext}");
-            counter++;
-        }
-
-        sourceFile.MoveTo(destPath, overwrite: true);
     }
 }

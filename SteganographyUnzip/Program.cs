@@ -56,7 +56,7 @@ internal class Program
 
     private static readonly RootCommand rootCommand = new(
         $"自动解压隐写 MP4 压缩包和多层压缩包。{Environment.NewLine}" +
-        "请自行安装 Bandizip 或 7-zip/NanaZip，或将他们的控制台版本可执行文件复制到本程序目录下。")
+        "请自行安装 7-zip/NanaZip 或 Bandizip，或将他们的控制台版本可执行文件复制到本程序目录下。")
     {
         argumentPaths,
         optionPassword,

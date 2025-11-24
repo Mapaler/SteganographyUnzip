@@ -9,10 +9,10 @@ public static class ExtractorDetector
 {
     private static readonly (string name, ExtractorType type)[] Candidates =
     {
-        ("bz", ExtractorType.Bandizip),
         ("7z", ExtractorType.SevenZip),
         ("7za", ExtractorType.SevenZip),
-        ("NanaZipC", ExtractorType.SevenZip)
+        ("NanaZipC", ExtractorType.SevenZip),
+        ("bz", ExtractorType.Bandizip)
     };
 
     /// <summary>
