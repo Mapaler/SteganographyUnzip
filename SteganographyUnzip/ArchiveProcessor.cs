@@ -12,7 +12,7 @@ public class ArchiveProcessor
     private readonly DirectoryInfo _tempDir;
     private readonly string? _userProvidedPassword;
     private readonly IReadOnlyList<string>? _additionalPasswords;
-    private readonly string? _userSpecifiedExtractor; // 用户可指定解压工具路径或命令
+    private readonly string? _userSpecifiedExtractor;
 
     public ArchiveProcessor(
         string outputDirectory,
@@ -39,94 +39,123 @@ public class ArchiveProcessor
         if (!initialFile.Exists)
             throw new FileNotFoundException($"输入文件不存在: {inputPath}");
 
-        // 🚀 使用 ExtractorDetector 获取解压器（全局一次即可，或每层都检测？这里每层都检测更灵活）
         var extractor = ExtractorDetector.ResolveExtractor(_userSpecifiedExtractor);
         Console.WriteLine($"🔧 使用解压工具: {extractor.CommandName} ({extractor.Type})");
 
-        var queue = new Queue<(FileInfo archive, DirectoryInfo finalOutput)>();
-        queue.Enqueue((initialFile, _outputDir));
+        // 👇 队列增加 inheritedPassword 字段
+        var queue = new Queue<(FileInfo archive, DirectoryInfo finalOutput, string? inheritedPassword)>();
+        queue.Enqueue((initialFile, _outputDir, null));
 
-        while (queue.Count > 0)
+        try
         {
-            var (currentFile, finalOutput) = queue.Dequeue();
-            Console.WriteLine($"\n📦 处理: {currentFile.Name} ({currentFile.Length / 1024 / 1024} MiB)");
-
-            var candidates = GetCandidatePasswords(currentFile);
-            var strategy = CreateStrategy(extractor.Type);
-
-            string tempSubDirName = Path.GetRandomFileName();
-            var tempExtractDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, tempSubDirName));
-            tempExtractDir.Create();
-
-            try
+            while (queue.Count > 0)
             {
-                // 🔍 列出内容（带密码尝试）
-                List<string> fileList = await strategy.ListContentsAsync(
-                    currentFile,
-                    extractor.CommandName,
-                    candidates,
-                    cancellationToken);
+                var (currentFile, finalOutput, inheritedPassword) = queue.Dequeue();
+                Console.WriteLine($"\n📦 处理: {currentFile.Name} ({currentFile.Length / 1024 / 1024} MiB)");
 
-                Console.WriteLine($"📄 内容预览: {string.Join(", ", fileList.Take(5))}{(fileList.Count > 5 ? "..." : "")}");
+                var candidates = GetCandidatePasswords(currentFile, inheritedPassword); // 👈 传入继承密码
+                var strategy = CreateStrategy(extractor.Type);
 
-                if (IsContinuableArchive(fileList))
-                {
-                    Console.WriteLine("🔍 检测到隐写载体，尝试解压下一层...");
+                string tempSubDirName = Path.GetRandomFileName();
+                var tempExtractDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, tempSubDirName));
+                tempExtractDir.Create();
 
-                    string? effectivePassword = await TryExtractWithCandidatesAsync(
-                        currentFile, extractor, strategy, tempExtractDir, candidates, cancellationToken);
-
-                    if (effectivePassword == null)
-                        throw new InvalidOperationException("无法解压当前压缩包");
-
-                    var extractedFiles = Directory.GetFiles(tempExtractDir.FullName, "*", SearchOption.TopDirectoryOnly)
-                                                  .Select(f => new FileInfo(f))
-                                                  .ToList();
-
-                    foreach (var file in extractedFiles)
-                    {
-                        queue.Enqueue((file, finalOutput));
-                    }
-                }
-                else
-                {
-                    string? effectivePassword = await TryExtractWithCandidatesAsync(
-                        currentFile, extractor, strategy, tempExtractDir, candidates, cancellationToken);
-
-                    if (effectivePassword == null)
-                        throw new InvalidOperationException("无法解压当前压缩包");
-
-                    MoveFilesToOutput(tempExtractDir, finalOutput);
-                    Console.WriteLine($"✅ 已解压到: {finalOutput.FullName}");
-                }
-            }
-            finally
-            {
                 try
                 {
-                    DebugLog($"🗑️ 删除临时文件夹 \"{tempExtractDir.Name}\"");
-                    tempExtractDir.Delete(true);
+                    List<string> fileList = await strategy.ListContentsAsync(
+                        currentFile,
+                        extractor.CommandName,
+                        candidates,
+                        cancellationToken);
+
+                    Console.WriteLine($"📄 内容预览: {string.Join(", ", fileList.Take(5))}{(fileList.Count > 5 ? "..." : "")}");
+
+                    if (IsContinuableArchive(fileList))
+                    {
+                        Console.WriteLine("🔍 检测到隐写载体，尝试解压下一层...");
+
+                        string? effectivePassword = await TryExtractWithCandidatesAsync(
+                            currentFile, extractor, strategy, tempExtractDir, candidates, cancellationToken);
+
+                        if (effectivePassword == null)
+                            throw new InvalidOperationException("无法解压当前压缩包");
+
+                        var extractedFiles = Directory.GetFiles(tempExtractDir.FullName, "*", SearchOption.TopDirectoryOnly)
+                                                      .Select(f => new FileInfo(f))
+                                                      .ToList();
+
+                        foreach (var file in extractedFiles)
+                        {
+                            // 👇 关键：将有效密码传递给子文件
+                            queue.Enqueue((file, finalOutput, effectivePassword));
+                        }
+                    }
+                    else
+                    {
+                        string? effectivePassword = await TryExtractWithCandidatesAsync(
+                            currentFile, extractor, strategy, tempExtractDir, candidates, cancellationToken);
+
+                        if (effectivePassword == null)
+                            throw new InvalidOperationException("无法解压当前压缩包");
+
+                        MoveFilesToOutput(tempExtractDir, finalOutput);
+                        Console.WriteLine($"✅ 已解压到: {finalOutput.FullName}");
+                    }
                 }
-                catch { }
+                finally
+                {
+                    // 👇 不再在这里删除！移到外层统一清理
+                    // 保留注释说明
+                    // DebugLog($"🗑️ 延迟删除临时文件夹 \"{tempExtractDir.Name}\"");
+                }
+            }
+
+            Console.WriteLine("\n🎉 所有文件处理完成！");
+        }
+        finally
+        {
+            // 👇 统一清理整个临时目录（安全且简单）
+            try
+            {
+                if (_tempDir.Exists)
+                {
+                    DebugLog($"🗑️ 清理全部临时目录: {_tempDir.FullName}");
+                    //_tempDir.Delete(true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ 无法清理临时目录: {ex.Message}");
             }
         }
-
-        Console.WriteLine("\n🎉 所有文件处理完成！");
     }
 
-    private List<string> GetCandidatePasswords(FileInfo file)
+    // 👇 修改：接收 inheritedPassword
+    private List<string> GetCandidatePasswords(FileInfo file, string? inheritedPassword)
     {
         var candidates = new List<string>();
+
+        // 1. 用户提供的密码（最高优先级）
         if (!string.IsNullOrEmpty(_userProvidedPassword))
             candidates.Add(_userProvidedPassword);
-        if (ExtractPasswordFromPath(file.FullName) is string pwd)
-            candidates.Add(pwd);
+
+        // 2. 从路径提取的密码
+        if (ExtractPasswordFromPath(file.FullName) is string pwdFromPath)
+            candidates.Add(pwdFromPath);
+
+        // 3. 继承自父级的有效密码（重要！）
+        if (!string.IsNullOrEmpty(inheritedPassword) && !candidates.Contains(inheritedPassword))
+            candidates.Add(inheritedPassword);
+
+        // 4. 额外尝试的密码
         if (_additionalPasswords?.Count > 0)
-            candidates.AddRange(_additionalPasswords);
-        candidates.Add(string.Empty);
+            candidates.AddRange(_additionalPasswords.Where(p => !candidates.Contains(p)));
+
+        // 5. 空密码（最后尝试）
+        if (!candidates.Contains(""))
+            candidates.Add("");
 
         DebugLog($"🔍 为 \"{file.Name}\" 准备的密码候选: [{string.Join(", ", candidates.Select(p => string.IsNullOrEmpty(p) ? "(空)" : p))}]");
-
         return candidates.Distinct().ToList();
     }
 
@@ -139,13 +168,11 @@ public class ArchiveProcessor
         {
             ".7z", ".zip", ".rar", ".tar", ".gz", ".bz2", ".xz"
         };
-
         var stegoCarrierExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp",
             ".mp4", ".mov", ".avi", ".mkv", ".wmv",
-            ".wav", ".mp3", ".flac",
-            ".pdf"
+            ".wav", ".mp3", ".flac", ".pdf"
         };
 
         // 情况 1：只解压出 1 个文件
@@ -155,37 +182,23 @@ public class ArchiveProcessor
             string fileName = Path.GetFileName(filePath);
             string ext = Path.GetExtension(fileName);
 
-            // 是压缩包？→ 继续
             if (archiveExtensions.Contains(ext))
                 return true;
-
-            // 是隐写载体？→ 也继续（尝试当作压缩包解）
             if (stegoCarrierExtensions.Contains(ext))
                 return true;
-
-            //// 特殊：单个 .001 文件（虽然少见，但允许）
-            //if (fileName.EndsWith(".001", StringComparison.OrdinalIgnoreCase))
-            //{
-            //    string baseName = Path.GetFileNameWithoutExtension(fileName); // 移除 .001
-            //    string baseExt = Path.GetExtension(baseName);
-            //    if (archiveExtensions.Contains(baseExt))
-            //        return true;
-            //}
-
             return false;
         }
 
-        // 情况 2：解压出多个文件 → 只检查是否含压缩包或分卷
+        // 情况 2：多个文件 → 检查是否含压缩包或 .001 分卷
         foreach (string filePath in fileList)
         {
             string fileName = Path.GetFileName(filePath);
             string ext = Path.GetExtension(fileName);
 
-            // 是压缩包？
             if (archiveExtensions.Contains(ext))
                 return true;
 
-            // 是 .001 分卷？（只需检测 .001，因为解压时传它即可）
+            // 检查 .001 分卷（必须和主扩展名匹配）
             if (fileName.EndsWith(".001", StringComparison.OrdinalIgnoreCase))
             {
                 string baseName = Path.GetFileNameWithoutExtension(fileName);
@@ -234,7 +247,6 @@ public class ArchiveProcessor
                 string args = strategy.BuildExtractArguments(archive, outputDir, pwd);
                 Console.WriteLine($"🔓 尝试解压密码: {(string.IsNullOrEmpty(pwd) ? "(空)" : pwd)}");
 
-                // ✅ 使用新方法，showOutput=true 让用户看到进度！
                 var (exitCode, _, error) = await ProcessHelper.ExecuteAsync(
                     extractor.CommandName, args, showOutput: true, ct);
 
@@ -245,10 +257,10 @@ public class ArchiveProcessor
                 }
 
                 string stderr = error.ToString();
-                if (stderr.Contains("Wrong password") ||
-                    stderr.Contains("Invalid password") ||
-                    stderr.Contains("Cannot open encrypted archive") ||
-                    stderr.Contains("Headers Error"))
+                if (stderr.Contains("Wrong password", StringComparison.OrdinalIgnoreCase) ||
+                    stderr.Contains("Invalid password", StringComparison.OrdinalIgnoreCase) ||
+                    stderr.Contains("Cannot open encrypted archive", StringComparison.OrdinalIgnoreCase) ||
+                    stderr.Contains("Headers Error", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -262,6 +274,7 @@ public class ArchiveProcessor
         }
         return null;
     }
+
     #region 从路径里提取密码的逻辑
     private static readonly Regex PasswordHintRegex = new(
         @"(?:解压码|密码)(?:：|:)(?<pw>\S+)",
@@ -269,12 +282,10 @@ public class ArchiveProcessor
 
     private static string? ExtractPasswordFromPath(string path)
     {
-        // 先试文件名
         string fileName = Path.GetFileNameWithoutExtension(path);
         if (TryExtract(fileName, out string? pwd))
             return pwd;
 
-        // 再试各级目录名
         string? dir = Path.GetDirectoryName(path);
         while (!string.IsNullOrEmpty(dir))
         {

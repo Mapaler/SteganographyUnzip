@@ -117,7 +117,7 @@ internal class Program
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"🔥 处理 {archive.Name} 时出错: {ex.Message}");
+                    Console.WriteLine($"🔥 处理 \"{archive.Name}\" 时出错: {ex.Message}");
                     // 可选择继续或退出，这里选择继续
                 }
             }

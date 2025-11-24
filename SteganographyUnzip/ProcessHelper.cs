@@ -1,3 +1,4 @@
+// ProcessHelper.cs
 using System.Diagnostics;
 using System.Text;
 using static DebugUtil;
@@ -24,6 +25,7 @@ public static class ProcessHelper
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = true, // 👈 关键：显式重定向 stdin
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8
             }
@@ -56,6 +58,10 @@ public static class ProcessHelper
         process.ErrorDataReceived += OnErrorDataReceived;
 
         process.Start();
+
+        // 👇 关键：立即关闭 stdin，防止程序等待输入（如密码错误时）
+        process.StandardInput.Close();
+
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 

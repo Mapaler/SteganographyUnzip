@@ -120,37 +120,4 @@ public class BandizipStrategy : IExtractorStrategy
     private static bool IsWrongPasswordFromOutput(string error) =>
         error.Contains("Wrong password", StringComparison.OrdinalIgnoreCase) ||
         error.Contains("Invalid password", StringComparison.OrdinalIgnoreCase);
-
-    // --- 工具方法 ---
-    private static async Task ConsumeAndAppendAsync(StreamReader reader, StringBuilder builder, CancellationToken ct)
-    {
-        string? line;
-        while ((line = await reader.ReadLineAsync(ct)) != null)
-        {
-            builder.AppendLine(line);
-        }
-    }
-
-    private static async Task WaitForExitAsync(Process process, CancellationToken ct)
-    {
-        var tcs = new TaskCompletionSource<bool>();
-        void OnExited(object sender, EventArgs e) => tcs.TrySetResult(true);
-
-        process.EnableRaisingEvents = true;
-        process.Exited += OnExited;
-
-        try
-        {
-            using (ct.Register(() => tcs.TrySetCanceled()))
-            {
-                if (!process.HasExited)
-                    await tcs.Task;
-            }
-        }
-        finally
-        {
-            process.Exited -= OnExited;
-        }
-        process.WaitForExit();
-    }
 }
