@@ -17,23 +17,28 @@ internal class Program
     {
         Description = "解压密码"
     };
-    private static readonly Option<DirectoryInfo> optionOutputDirectory = new("--output-directory", "-o")
+    private static readonly Option<DirectoryInfo> optionOutputDirectory = new("--output-dir", "-o")
     {
-        Description = "解码目标目录"
+        Description = "最终解压目标目录，默认为压缩包同目录"
     };
-    private static readonly Option<DirectoryInfo> optionTempDirectory = new("--temp-directory", "-t")
+    private static readonly Option<DirectoryInfo> optionTempDirectory = new("--temp-dir", "-t")
     {
-        Description = "多层压缩包中间文件临时暂存目录",
+        Description = "多层压缩包中间文件临时暂存目录（有条件可设置到内存盘，以减少磁盘磨损）",
         DefaultValueFactory = parseResult => new DirectoryInfo(Path.GetTempPath())
     };
     private static readonly Option<string> optionExeType = new("-exe")
     {
         Description = "指定解压程序",
-        CompletionSources = { "bz", "7z", "7za" }
+        CompletionSources = { "7z", "7za", "NanaZipC", "bz" }
     };
-    private static readonly Option<FileInfo> optionPasswordFile = new("--password-file", "-f")
+    private static readonly Option<FileInfo> optionPasswordFile = new("--password-file")
     {
         Description = "从文本文件读取密码列表（每行一个密码）"
+    };
+    private static readonly Option<bool> optionDeleteOriginalFile = new("--delete-orig-file")
+    {
+        Description = "【危险！】解压完成后删除原始文件",
+        DefaultValueFactory = parseResult => false
     };
 
     private static readonly RootCommand rootCommand = new(
@@ -45,7 +50,8 @@ internal class Program
         optionOutputDirectory,
         optionTempDirectory,
         optionExeType,
-        optionPasswordFile
+        optionPasswordFile,
+        optionDeleteOriginalFile
     };
 
     static int Main(string[] args)
@@ -66,6 +72,8 @@ internal class Program
             DirectoryInfo? userOutputDir = parseResult.GetValue(optionOutputDirectory); // 用户指定的（可能为 null）
             DirectoryInfo tempDir = parseResult.GetValue(optionTempDirectory)!;
             string? exeName = parseResult.GetValue(optionExeType);
+            bool deleteOriginalFile = parseResult.GetValue(optionDeleteOriginalFile);
+            
 
             // ✅ 从文件读取密码列表
             List<string> passwordList = new List<string>();
@@ -113,7 +121,8 @@ internal class Program
                         tempDirectory: tempDir.FullName,
                         userProvidedPassword: password,
                         additionalPasswords: passwordList,
-                        userSpecifiedExtractor: exeName
+                        userSpecifiedExtractor: exeName,
+                        deleteOriginalFile: deleteOriginalFile
                     );
 
                     await processor.ProcessAsync(archive.FullName, cancellationToken);

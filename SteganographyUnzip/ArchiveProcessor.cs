@@ -12,19 +12,22 @@ public class ArchiveProcessor
     private readonly string? _userProvidedPassword;
     private readonly List<string>? _additionalPasswords;
     private readonly string? _userSpecifiedExtractor;
+    private readonly bool _deleteOriginalFile;
 
     public ArchiveProcessor(
         string outputDirectory,
         string tempDirectory,
         string? userProvidedPassword = null,
         List<string>? additionalPasswords = null,
-        string? userSpecifiedExtractor = null)
+        string? userSpecifiedExtractor = null,
+        bool deleteOriginalFile = false)
     {
         _outputDir = new DirectoryInfo(outputDirectory);
         _tempDir = new DirectoryInfo(tempDirectory);
         _userProvidedPassword = userProvidedPassword;
         _additionalPasswords = additionalPasswords;
         _userSpecifiedExtractor = userSpecifiedExtractor;
+        _deleteOriginalFile = deleteOriginalFile;
     }
 
     public async Task ProcessAsync(string inputPath, CancellationToken cancellationToken = default)
@@ -213,6 +216,12 @@ public class ArchiveProcessor
 
             Console.WriteLine("\n🎉 所有文件处理完成！");
             completedSuccessfully = true;
+
+            // ✅ 在这里删除原始文件（包括分卷）
+            if (_deleteOriginalFile && completedSuccessfully)
+            {
+                DeleteOriginalFiles(initialFile);
+            }
         }
         finally
         {
@@ -237,37 +246,25 @@ public class ArchiveProcessor
     }
 
     #region 辅助方法（保持不变）
-
-    private List<string> GetCandidatePasswords(FileInfo file, string? inheritedPassword)
+    private void DeleteOriginalFiles(FileInfo mainFile)
     {
-        var candidates = new List<string>();
-
-        if (_userProvidedPassword != null)
-            candidates.Add(_userProvidedPassword);
-
-        if (ExtractPasswordFromPath(file.FullName) is string pwdFromPath && !string.IsNullOrEmpty(pwdFromPath))
-            candidates.Add(pwdFromPath);
-
-        if (!string.IsNullOrEmpty(inheritedPassword))
-            candidates.Add(inheritedPassword);
-
-        if (_additionalPasswords?.Count > 0)
-            candidates.AddRange(_additionalPasswords.Where(p => !string.IsNullOrEmpty(p)));
-
-        candidates.Add("");
-
-        var seen = new HashSet<string>();
-        var uniqueCandidates = new List<string>();
-        foreach (var pwd in candidates)
+        try
         {
-            if (seen.Add(pwd))
+            var volumeFiles = GetVolumeFiles(mainFile);
+            foreach (var file in volumeFiles)
             {
-                uniqueCandidates.Add(pwd);
+                if (file.Exists)
+                {
+                    file.Delete();
+                    Console.WriteLine($"🗑️ 已删除原始文件: {file.Name}");
+                }
             }
         }
-
-        ConsoleHelper.Debug($"🔍 为 \"{file.Name}\" 准备的密码候选: [{string.Join(", ", uniqueCandidates.Select(p => string.IsNullOrEmpty(p) ? "(空)" : p))}]");
-        return uniqueCandidates;
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ 删除原始文件时出错: {ex.Message}");
+            // 不抛出异常，避免影响主流程
+        }
     }
 
     private static bool IsContinuableArchive(List<string> fileList)
@@ -408,34 +405,6 @@ public class ArchiveProcessor
         return null;
     }
 
-    private static readonly Regex PasswordHintRegex = new(
-        @"(?:解压码|密码)(?:：|:)(?<pw>\S+)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    private static string? ExtractPasswordFromPath(string path)
-    {
-        string fileName = Path.GetFileNameWithoutExtension(path);
-        if (TryExtract(fileName, out string? pwd))
-            return pwd;
-
-        string? dir = Path.GetDirectoryName(path);
-        while (!string.IsNullOrEmpty(dir))
-        {
-            string dirName = Path.GetFileName(dir);
-            if (TryExtract(dirName, out pwd))
-                return pwd;
-            dir = Path.GetDirectoryName(dir);
-        }
-        return null;
-
-        bool TryExtract(string text, out string? password)
-        {
-            var match = PasswordHintRegex.Match(text);
-            password = match.Success ? match.Groups["pw"].Value : null;
-            return match.Success;
-        }
-    }
-
     private static bool IsPasswordRelatedError(string message)
     {
         if (string.IsNullOrEmpty(message))
@@ -482,6 +451,82 @@ public class ArchiveProcessor
     {
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
         return ext is ".mp4" or ".mov" or ".avi" or ".mkv" or ".wmv" or ".jpg" or ".jpeg" or ".png" or ".bmp" or ".gif" or ".webp" or ".pdf" or ".doc" or ".docx" or ".zip" or ".7z" or ".rar";
+    }
+
+    private static readonly Regex VolumePattern = new(
+    @"^(.+?)(?:\.(?:part|vol)?(\d+)(?:\.rar|\.zip|\.7z)?)?$",
+    RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// 获取分卷压缩包的所有相关文件
+    /// 支持格式: .7z.001, .part1.rar, .vol01.rar, .zip.001 等
+    /// </summary>
+    private List<FileInfo> GetVolumeFiles(FileInfo mainFile)
+    {
+        var files = new List<FileInfo>();
+        string dir = mainFile.DirectoryName ?? ".";
+
+        // 尝试匹配常见分卷模式
+        string fileName = mainFile.Name;
+
+        // 模式 1: xxx.7z.001, xxx.7z.002 ...
+        if (fileName.EndsWith(".001", StringComparison.OrdinalIgnoreCase))
+        {
+            string baseName = fileName.Substring(0, fileName.Length - 4); // 移除 .001
+            int volNum = 1;
+            while (true)
+            {
+                string volPath = Path.Combine(dir, $"{baseName}.{volNum:D3}");
+                if (File.Exists(volPath))
+                    files.Add(new FileInfo(volPath));
+                else
+                    break;
+                volNum++;
+            }
+        }
+        // 模式 2: xxx.part1.rar, xxx.part2.rar ...
+        else if (Regex.IsMatch(fileName, @"\.part\d+\.rar$", RegexOptions.IgnoreCase))
+        {
+            string baseMatch = Regex.Match(fileName, @"^(.+?)\.part\d+\.rar$", RegexOptions.IgnoreCase).Groups[1].Value;
+            if (!string.IsNullOrEmpty(baseMatch))
+            {
+                int partNum = 1;
+                while (true)
+                {
+                    string partPath = Path.Combine(dir, $"{baseMatch}.part{partNum}.rar");
+                    if (File.Exists(partPath))
+                        files.Add(new FileInfo(partPath));
+                    else
+                        break;
+                    partNum++;
+                }
+            }
+        }
+        // 模式 3: xxx.vol01.rar, xxx.vol02.rar ...
+        else if (Regex.IsMatch(fileName, @"\.vol\d+\.rar$", RegexOptions.IgnoreCase))
+        {
+            string baseMatch = Regex.Match(fileName, @"^(.+?)\.vol\d+\.rar$", RegexOptions.IgnoreCase).Groups[1].Value;
+            if (!string.IsNullOrEmpty(baseMatch))
+            {
+                int volNum = 1;
+                while (true)
+                {
+                    string volPath = Path.Combine(dir, $"{baseMatch}.vol{volNum:D2}.rar");
+                    if (File.Exists(volPath))
+                        files.Add(new FileInfo(volPath));
+                    else
+                        break;
+                    volNum++;
+                }
+            }
+        }
+        // 默认：单个文件
+        else
+        {
+            files.Add(mainFile);
+        }
+
+        return files;
     }
 
     #endregion

@@ -8,7 +8,7 @@
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
     <AssemblyName>suz</AssemblyName>
-    <AssemblyTitle>隐写解压</AssemblyTitle>
+    <AssemblyTitle>隐写压缩包解压</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>

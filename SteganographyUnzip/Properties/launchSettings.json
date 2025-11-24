@@ -2,7 +2,7 @@
   "profiles": {
     "SteganographyUnzip": {
       "commandName": "Project",
-      "commandLineArgs": "-t R:\\tempFolder -o R:\\finnalyFolder -exe 7z  \"里面有隐写文件的压缩包 解压码：PADIO294.7z\""
+      "commandLineArgs": "-t R:\\tempFolder -o R:\\finnalyFolder -exe 7z  \"7z无法直接获取内容的隐写压缩包 解压码：yejiang.mp4\""
     }
   }
 }

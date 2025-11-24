@@ -92,8 +92,8 @@ public class SevenZipStrategy : IExtractorStrategy
             args.AppendFormat(" -p\"{0}\"", password);
 
         args.AppendFormat(" -o\"{0}\"", outputDir.FullName);
-        args.AppendFormat(" \"{0}\"", archive.FullName);
         args.Append(" -y");
+        args.AppendFormat(" \"{0}\"", archive.FullName);
 
         return args.ToString();
     }
