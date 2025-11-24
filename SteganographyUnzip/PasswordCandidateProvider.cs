@@ -8,7 +8,7 @@ namespace SteganographyUnzip
     public class PasswordCandidateProvider
     {
         private static readonly Regex PasswordHintRegex = new(
-            @"(?:解压码|密码)(?:：|:)(?<pw>\S+)",
+            @"(?:解压码|密码)(?:：|:)?(?<pw>\S+)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         public List<string> GetCandidatePasswords(
