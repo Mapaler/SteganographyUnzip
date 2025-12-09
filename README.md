@@ -30,6 +30,7 @@ Options:
   -exe <7z|7za|bz|NanaZipC>        指定解压程序
   --password-file <password-file>  从文本文件读取密码列表（每行一个密码）
   --delete-orig-file               【危险！】解压完成后删除原始文件
+  --use-clipboard                  从剪贴板读取密码（需为纯文本）
   -?, -h, --help                   Show help and usage information
   --version                        Show version information
 </pre>
